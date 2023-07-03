@@ -163,10 +163,6 @@ def get_notes(filename):
     return convert_to_lengths(channels, beats_per_bar), beats_per_bar
 
 
-def remove_bad_files(dir_name=full_dir):
-    iterate_all_files(check_midi_file, os.remove, dir_name)
-
-
 def check_midi_file(filename):
     mido.MidiFile(filename)
 
