@@ -52,22 +52,22 @@ def get_midi_group(x):
         return -1
 
 
-full_dir = 'C:\\Users\\Eleizerovich\\OneDrive - Gita Technologies LTD\\Desktop\\School\\lmd_full'
-matched_dir = 'C:\\Users\\Eleizerovich\\OneDrive - Gita Technologies LTD\\Desktop\\School\\lmd_matched'
+full_dir = 'C:\\lmd_full'
+matched_dir = 'C:\\lmd_matched'
 
 
-def iterate_all_files(func, fail_func, type='.mid', directory=full_dir):
+def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lambda x: None):
     for x in os.listdir(directory):
         f = directory + '\\' + x
         if os.path.isfile(f):
-            if os.path.splitext(f)[1] == type:
+            if os.path.splitext(f)[1] == file_type:
                 try:
                     func(f)
                 except Exception as e:
                     print('Failed on file', x, e)
                     fail_func(f)
         else:
-            iterate_all_files(func, fail_func, type, f)
+            iterate_all_files(func, file_type, f, fail_func)
 
 
 def get_random_file(dir_name=full_dir):
@@ -172,36 +172,91 @@ def check_midi_file(filename):
 
 
 def fix_timings(channels):
+    last_k = None
     for k in channels.keys():
         for i, bar in enumerate(channels[k]):
             if bar:
-                no_more_silents = True
-                while no_more_silents:
-                    no_more_silents = False
+                continue_loop = True
+                while continue_loop:
+                    continue_loop = False
                     for j in range(len(bar) - 1):
                         if not bar[j][0] and not bar[j + 1][0]:
                             channels[k][i][j] = [[], bar[j][1] + bar[j + 1][1]]
                             del channels[k][i][j + 1]
-                            no_more_silents = True
+                            continue_loop = True
                             break
-                t = [round(x[1] * 3 * 16) / 3 / 16 for x in bar]
+                    if continue_loop or not bar:
+                        break
+                    if not bar[0][0] and bar[0][1] < 1 / 16:
+                        if i == 0:
+                            if last_k:
+                                l = 0
+                                while not channels[last_k][-1 - l]:
+                                    l += 1
+                                channels[last_k][-1 - l][-1][1] += bar[0][1]
+                                continue_loop = True
+                                del channels[k][0][0]
+                            else:
+                                channels[k][0][1][1] += bar[0][1]
+                                continue_loop = True
+                                del channels[k][0][0]
+                        else:
+                            l = 0
+                            while not channels[k][i - 1 - l]:
+                                l += 1
+                            channels[k][i - 1 - l][-1][1] += bar[0][1]
+                            continue_loop = True
+                            del channels[k][i][0]
+                    for j in range(1, len(bar)):
+                        if not bar[j][0] and bar[j][1] < 1 / 16:
+                            channels[k][i][j - 1][1] += bar[j][1]
+                            del channels[k][i][j]
+                            continue_loop = True
+                            break
+
+                t = [round(x[1] * 3 * 16) / 3.0 / 16 for x in bar]
                 for j in range(len(bar)):
                     channels[k][i][j][1] = t[j]
                     channels[k][i][j][0].sort()
+        last_k = k
     return channels
 
 
 def serialize_file(f):
-    inst = get_instruments(f)
-    ch, bpb = get_notes(f)
-    ch = fix_timings(ch)
-    song = {'Instruments': inst, 'Notes': ch, 'BeatsPerBar': bpb}
+    js = os.path.splitext(f)[0] + '.json'
+    if os.path.exists(js):
+        fix_json(js)
+    else:
+        inst = get_instruments(f)
+        ch, bpb = get_notes(f)
+        ch = fix_timings(ch)
+        write_json(os.path.splitext(f)[0], inst, ch, bpb)
+
+
+def write_json(f, inst, channels, bpb):
+    song = {'Instruments': inst, 'Notes': channels, 'BeatsPerBar': bpb}
     json_object = json.dumps(song)
-    with open("{0}.json".format(os.path.splitext(f)[0]), "w") as outfile:
+    with open("{0}.json".format(f), "w") as outfile:
         outfile.write(json_object)
 
 
+def load_json(f):
+    data = json.load(open(f, 'r'))
+    inst = data['Instruments']
+    channels = data['Notes']
+    bpb = data['BeatsPerBar']
+    return inst, channels, bpb
+
+
+def fix_json(f):
+    inst, channels, bpb = load_json(f)
+    channels = fix_timings(channels)
+    write_json(os.path.splitext(f)[0], inst, channels, bpb)
+
+
 if __name__ == '__main__':
-    iterate_all_files(serialize_file, print)
+    # for i in range(100):
+    # serialize_file(get_random_file())
+    iterate_all_files(serialize_file)
     # play_midi(f)
     # remove_bad_files()
