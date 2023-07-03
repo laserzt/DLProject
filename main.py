@@ -1,9 +1,12 @@
+import copy
+
 import mido
 import pygame
 import time
 import os
 import random
 import json
+import math
 
 instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
                'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
@@ -54,6 +57,7 @@ def get_midi_group(x):
 
 full_dir = 'C:\\lmd_full'
 matched_dir = 'C:\\lmd_matched'
+part_dir = 'C:\\lmd_full\\0'
 
 
 def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lambda x: None):
@@ -63,19 +67,26 @@ def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lamb
             if os.path.splitext(f)[1] == file_type:
                 try:
                     func(f)
-                except Exception as e:
-                    print('Failed on file', x, e)
+                except TypeError as e:
+                    print('Failed on file', x, type(e), e)
                     fail_func(f)
         else:
             iterate_all_files(func, file_type, f, fail_func)
 
 
-def get_random_file(dir_name=full_dir):
-    f = dir_name + '\\' + random.choice(os.listdir(dir_name))
-    if os.path.isfile(f):
-        return f
-    else:
-        return get_random_file(f)
+def get_random_file(dir_name=full_dir, file_type='.json'):
+    x = os.listdir(dir_name)
+    while x:
+        i = random.randint(0, len(x) - 1)
+        f = dir_name + '\\' + x[i]
+        if os.path.isfile(f):
+            if os.path.splitext(f)[1] == file_type:
+                return f
+        else:
+            y = get_random_file(f)
+            if y:
+                return y
+        del x[i]
 
 
 mixer_init = False
@@ -102,26 +113,28 @@ def get_instruments(filename):
     return res
 
 
-def convert_to_lengths(channels, beats_per_bar):
+def convert_to_lengths(channels):
     for k in channels.keys():
         j = 0
         while j < len(channels[k]) - 1:
             bar = channels[k][j]
-            for i in range(len(bar) - 1):
+            beats_per_bar = bar[0]
+            for i in range(1, len(bar) - 1):
                 bar[i][1] = bar[i + 1][1] - bar[i][1]
-            if len(bar) == 0:
+            if len(bar) <= 1:
                 j += 1
                 continue
             l = beats_per_bar - bar[-1][1]
-            while not channels[k][j + 1]:
+            while len(channels[k][j + 1]) <= 1:
+                l += channels[k][j + 1][0]
                 j += 1
-                l += beats_per_bar
-            bar[-1][1] = l + channels[k][j + 1][0][1]
+
+            bar[-1][1] = l + channels[k][j + 1][1][1]
             j += 1
         bar = channels[k][-1]
-        for i in range(len(bar) - 1):
+        for i in range(1, len(bar) - 1):
             bar[i][1] = bar[i + 1][1] - bar[i][1]
-        bar[-1][1] = beats_per_bar - bar[-1][1]
+        bar[-1][1] = bar[0] - bar[-1][1]
     return channels
 
 
@@ -129,10 +142,13 @@ def get_notes(filename):
     mid = mido.MidiFile(filename)
     tempo = 500000
     beats_per_bar = 4
+    next_beats_per_bar = beats_per_bar
     beats = 0
     channels = {}
     beats_in_bar = 0
     bar = 0
+    last_bar = 0
+    bar_offset = 0
     for msg in mid:
         ticks = 0
         if msg.time > 0:
@@ -140,79 +156,96 @@ def get_notes(filename):
         if msg.type == 'set_tempo':
             tempo = msg.tempo
         if msg.type == 'time_signature':
-            beats_per_bar = msg.numerator * 4 / msg.denominator
+            next_beats_per_bar = msg.numerator * 4 / msg.denominator
         if ticks:
             beats += ticks / mid.ticks_per_beat
             beats_in_bar = beats % beats_per_bar
-            bar = int(beats / beats_per_bar)
+            bar = bar_offset + int(beats / beats_per_bar)
+            if bar > last_bar and next_beats_per_bar != beats_per_bar:
+                bar_offset += int(beats / beats_per_bar)
+                beats = beats % beats_per_bar
+                beats_per_bar = next_beats_per_bar
+            last_bar = bar
         if msg.type == 'note_on' or msg.type == 'note_off':
             if msg.channel not in channels.keys():
                 channels[msg.channel] = []
             if len(channels[msg.channel]) <= bar:
                 for i in range(1 + bar - len(channels[msg.channel])):
-                    channels[msg.channel].append([])
+                    channels[msg.channel].append([beats_per_bar])
 
             if msg.type == 'note_off':
-                if (not channels[msg.channel][bar]) or channels[msg.channel][bar][-1][1] != beats_in_bar:
+                if len(channels[msg.channel][bar]) <= 1 or channels[msg.channel][bar][-1][1] != beats_in_bar:
                     channels[msg.channel][bar].append([[], beats_in_bar])
             else:
-                if (not channels[msg.channel][bar]) or channels[msg.channel][bar][-1][1] != beats_in_bar:
+                if len(channels[msg.channel][bar]) <= 1 or channels[msg.channel][bar][-1][1] != beats_in_bar:
                     channels[msg.channel][bar].append([[msg.note], beats_in_bar])
                 elif channels[msg.channel][bar][-1][1] == beats_in_bar:
                     channels[msg.channel][bar][-1][0].append(msg.note)
-    return convert_to_lengths(channels, beats_per_bar), beats_per_bar
+    return channels
 
 
 def check_midi_file(filename):
     mido.MidiFile(filename)
 
 
+def get_best_round(x):
+    y1 = math.ceil(x * 16) / 16
+    y2 = math.ceil(x * 3) / 3
+    if abs(x - y1) < abs(x - y2):
+        return y1
+    return y2
+
+
 def fix_timings(channels):
     last_k = None
     for k in channels.keys():
         for i, bar in enumerate(channels[k]):
-            if bar:
+            if len(bar) > 1:
                 continue_loop = True
                 while continue_loop:
                     continue_loop = False
-                    for j in range(len(bar) - 1):
+                    for j in range(1, len(bar) - 1):
                         if not bar[j][0] and not bar[j + 1][0]:
                             channels[k][i][j] = [[], bar[j][1] + bar[j + 1][1]]
                             del channels[k][i][j + 1]
                             continue_loop = True
                             break
-                    if continue_loop or not bar:
+                    if len(bar) <= 1:
                         break
-                    if not bar[0][0] and bar[0][1] < 1 / 16:
+                    if continue_loop:
+                        continue
+                    if not bar[1][0] and bar[1][1] < 1 / 16:
                         if i == 0:
                             if last_k:
                                 l = 0
-                                while not channels[last_k][-1 - l]:
+                                while len(channels[last_k][-1 - l]) <= 1 and l < len(channels[last_k]):
                                     l += 1
-                                channels[last_k][-1 - l][-1][1] += bar[0][1]
-                                continue_loop = True
-                                del channels[k][0][0]
+                                if l < len(channels[last_k]):
+                                    channels[last_k][-1 - l][-1][1] += bar[1][1]
                             else:
-                                channels[k][0][1][1] += bar[0][1]
-                                continue_loop = True
-                                del channels[k][0][0]
+                                channels[k][i][1][1] += bar[1][1]
                         else:
                             l = 0
-                            while not channels[k][i - 1 - l]:
+                            while len(channels[k][i - 1 - l]) <= 1 and l < len(channels[k]):
                                 l += 1
-                            channels[k][i - 1 - l][-1][1] += bar[0][1]
-                            continue_loop = True
-                            del channels[k][i][0]
-                    for j in range(1, len(bar)):
+                            if l < len(channels[k]):
+                                channels[k][i - 1 - l][-1][1] += bar[1][1]
+                        del channels[k][i][1]
+                        continue_loop = True
+                        continue
+                    for j in range(2, len(bar)):
                         if not bar[j][0] and bar[j][1] < 1 / 16:
                             channels[k][i][j - 1][1] += bar[j][1]
                             del channels[k][i][j]
                             continue_loop = True
                             break
 
-                t = [round(x[1] * 3 * 16) / 3.0 / 16 for x in bar]
-                for j in range(len(bar)):
-                    channels[k][i][j][1] = t[j]
+                for j in range(1, len(bar)):
+                    channels[k][i][j][1] = get_best_round(bar[j][1])
+                    s = set()
+                    for x in channels[k][i][j][0]:
+                        s.add(x)
+                    channels[k][i][j][0] = list(s)
                     channels[k][i][j][0].sort()
         last_k = k
     return channels
@@ -224,13 +257,13 @@ def serialize_file(f):
         fix_json(js)
     else:
         inst = get_instruments(f)
-        ch, bpb = get_notes(f)
+        ch = get_notes(f)
         ch = fix_timings(ch)
-        write_json(os.path.splitext(f)[0], inst, ch, bpb)
+        write_json(os.path.splitext(f)[0], inst, ch)
 
 
-def write_json(f, inst, channels, bpb):
-    song = {'Instruments': inst, 'Notes': channels, 'BeatsPerBar': bpb}
+def write_json(f, inst, channels):
+    song = {'Instruments': inst, 'Notes': channels}
     json_object = json.dumps(song)
     with open("{0}.json".format(f), "w") as outfile:
         outfile.write(json_object)
@@ -240,19 +273,15 @@ def load_json(f):
     data = json.load(open(f, 'r'))
     inst = data['Instruments']
     channels = data['Notes']
-    bpb = data['BeatsPerBar']
-    return inst, channels, bpb
+    return inst, channels
 
 
 def fix_json(f):
-    inst, channels, bpb = load_json(f)
-    channels = fix_timings(channels)
-    write_json(os.path.splitext(f)[0], inst, channels, bpb)
+    inst, channels = load_json(f)
+    new_channels = fix_timings(channels)
+    if new_channels != channels:
+        write_json(os.path.splitext(f)[0], inst, new_channels)
 
 
 if __name__ == '__main__':
-    # for i in range(100):
-    # serialize_file(get_random_file())
-    iterate_all_files(serialize_file)
-    # play_midi(f)
-    # remove_bad_files()
+    iterate_all_files(serialize_file, directory=part_dir)
