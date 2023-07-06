@@ -1,5 +1,3 @@
-import copy
-import numpy as np
 import mido
 import pygame
 import time
@@ -121,7 +119,7 @@ def convert_to_lengths(channels):
         for j, bar in enumerate(channels[k]):
             beats_per_bar = bar[0]
             new_bar = [beats_per_bar]
-            if len(bar) > 1:
+            if len(bar) > 1 and bar[1][1] > 0:
                 new_bar.append([[], bar[1][1]])
             else:
                 new_bar.append([[], beats_per_bar])
@@ -156,7 +154,7 @@ def get_notes(filename):
             next_ticks_per_bar = msg.numerator * 4.0 / msg.denominator * mid.ticks_per_beat
         if ticks:
             ignore_ticks += ticks
-            if ignore_ticks >= mid.ticks_per_beat / 8.0:
+            if ignore_ticks >= mid.ticks_per_beat / 8.0:  # 32th notes
                 cum_ticks += ignore_ticks
                 ignore_ticks = 0
                 ticks_in_bar = cum_ticks % ticks_per_bar
@@ -194,27 +192,30 @@ def get_best_round(x):
 def fix_timings(channels, ticks_per_beat):
     for k in channels:
         for j, bar in enumerate(channels[k]):
-            if len(bar) > 1:
-                err = 0
-                s = 0
-                for i, x in enumerate(bar[1:]):
-                    d = (max(0.0, x[1] + err * 1.0 / (len(bar[1:]) - i)))
-                    if i < len(bar[1:]) - 1:
-                        d = get_best_round(d * 1.0 / ticks_per_beat) * ticks_per_beat
-                    else:
-                        d = bar[0] - s
-                    channels[k][j][i + 1][1] = d / ticks_per_beat
-                    s += d
-                    err = x[1] - d
-            channels[k][j][0] /= ticks_per_beat
+            err = 0
+            s = 0
+            for i, x in enumerate(bar[1:]):
+                d = (max(0.0, x[1] + err * 1.0 / (len(bar[1:]) - i)))
+                if i < len(bar[1:]) - 1:
+                    d = get_best_round(d * 1.0 / ticks_per_beat) * ticks_per_beat
+                else:
+                    d = bar[0] - s
+                channels[k][j][i + 1][1] = d / ticks_per_beat
+                s += d
+                err = x[1] - d
+            del channels[k][j][0]
     return channels
 
 
-def serialize_file(f):
+def get_data(f):
     inst = get_instruments(f)
     ch, tpb = get_notes(f)
     ch = convert_to_lengths(ch)
-    ch = fix_timings(ch, tpb)
+    return fix_timings(ch, tpb), inst
+
+
+def serialize_file(f):
+    ch, inst = get_data(f)
     write_json(os.path.splitext(f)[0], inst, ch)
 
 
