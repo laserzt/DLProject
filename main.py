@@ -64,11 +64,12 @@ def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lamb
         if os.path.isfile(f):
             if os.path.splitext(f)[1] == file_type:
                 try:
+                    print('Running on file', x)
                     if param:
                         func(f, param)
                     else:
                         func(f)
-                except TypeError as e:
+                except Exception as e:
                     print('Failed on file', x, type(e), e)
                     fail_func(f)
         else:
