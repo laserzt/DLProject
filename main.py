@@ -291,8 +291,8 @@ def load_json(f):
     return inst, channels
 
 
-def get_str_key(z):
-    return ','.join([':'.join(str(y) for y in x[0]) + '/' + '{0:g}'.format(x[1]) for x in z])
+def get_str_key(z, note_diff):
+    return ','.join([':'.join(str(note + note_diff) for note in x[0]) + '/' + '{0:g}'.format(x[1]) for x in z])
 
 
 def parse_str_key(x):
@@ -313,19 +313,19 @@ def join_str_keys(x, y):
     return ','.join([x, y])
 
 
-def get_tokens(m, bar, initialize=False):
+def get_tokens(m, bar, note_diff=0, initialize=False):
     tokens = []
     i = 0
     best_x = None
     x = None
     while i < len(bar):
         if x is None:
-            x = get_str_key([bar[i]])
+            x = get_str_key([bar[i]], note_diff)
             i += 1
         if x in m:
             if i < len(bar):
                 best_x = x
-                x = join_str_keys(x, get_str_key([bar[i]]))
+                x = join_str_keys(x, get_str_key([bar[i]], note_diff))
                 i += 1
             else:
                 tokens.append(m[x])
@@ -369,12 +369,12 @@ def tokenize(inst, channels):
     return token_channels, token_instruments
 
 
-def get_pairs_hist(channel, ms):
+def get_pairs_hist(channel, ms, note_diff):
     mm = ms[1]
     m = ms[0]
     initialize = ms[2]
     for bar in channel:
-        tokens, m = get_tokens(m, bar, initialize)
+        tokens, m = get_tokens(m, bar, note_diff, initialize)
         for i in range(len(tokens) - 1):
             pair = (tokens[i], tokens[i + 1])
             if pair in mm:
@@ -392,7 +392,8 @@ def count_file(f, ms):
         midi_group = get_midi_group(inst[k][1])
         if midi_group < 0:
             continue
-        ms[midi_group] = get_pairs_hist(channels[k], ms[midi_group])
+        for note_diff in range(-6, 6):
+            ms[midi_group] = get_pairs_hist(channels[k], ms[midi_group], note_diff)
 
 
 def calc_entropy(m):
@@ -427,7 +428,7 @@ def iterate_counts(rounds):
             y = [[ms[j][1][x], x] for x in ms[j][1]]
             if y:
                 y.sort(reverse=True)
-                for k in range(min(10, len(y))):
+                for k in range(min(48, len(y))):
                     k1 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][0])]
                     k2 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][1])]
                     ms[j][0][join_str_keys(k1, k2)] = len(ms[j][0])
