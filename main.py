@@ -5,6 +5,8 @@ import os
 import random
 import json
 import math
+import glob
+import copy
 
 instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
                'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
@@ -34,21 +36,21 @@ def get_midi_group(x):
     if x < 8:  # piano
         return 0
     elif x < 16:  # Chromatic Percussion
-        return 1
+        return -1
     elif x < 24:  # organ
-        return 2
+        return 0
     elif x < 32:  # Guitar
-        return 3
+        return 0
     elif x < 40:  # Bass
-        return 4
+        return 1
     elif x < 56:  # Strings
-        return 5
+        return 3
     elif x < 96:  # Solo
-        return 6
+        return 2
     elif x < 104:  # effects
         return -1
     elif x < 119:  # percussion
-        return 7
+        return -1
     else:  # effects
         return -1
 
@@ -57,26 +59,34 @@ full_dir = 'C:\\lmd_full'
 matched_dir = 'C:\\lmd_matched'
 part_dir = 'C:\\lmd_full\\0'
 
+out_dir = 'C:\\Users\\Eleizerovich\\OneDrive - Gita Technologies LTD\\Desktop\\School\\DLProjectData'
 
-def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lambda x: None, param=None):
-    for x in os.listdir(directory):
-        f = directory + '\\' + x
+
+def iterate_all_files(func, file_type='.json', directory=part_dir, fail_func=lambda x: None, param=None, verbose=False,
+                      prefix=None):
+    if prefix:
+        y = glob.glob(directory + '\\' + prefix + '*')
+    else:
+        y = glob.glob(directory + '\\*')
+    for f in y:
         if os.path.isfile(f):
             if os.path.splitext(f)[1] == file_type:
                 try:
-                    print('Running on file', x)
+                    if verbose:
+                        print('Running on file', f)
                     if param:
                         func(f, param)
                     else:
                         func(f)
                 except Exception as e:
-                    print('Failed on file', x, type(e), e)
+                    print('Failed on file', f, type(e), e)
                     fail_func(f)
+                    raise e
         else:
             iterate_all_files(func, file_type, f, fail_func)
 
 
-def get_random_file(dir_name=full_dir, file_type='.json'):
+def get_random_file(dir_name=part_dir, file_type='.json'):
     x = os.listdir(dir_name)
     while x:
         i = random.randint(0, len(x) - 1)
@@ -208,16 +218,62 @@ def fix_timings(channels, ticks_per_beat):
     return channels
 
 
+def fix_values(channels):
+    for k in channels:
+        for i in range(len(channels[k])):
+            silent = False
+            j = 0
+            while j < len(channels[k][i]):
+                s = set()
+                for x in channels[k][i][j][0]:
+                    s.add(x)
+                x = list(s)
+                if not x:
+                    if silent:
+                        channels[k][i][j - 1][1] += channels[k][i][j][1]
+                        del channels[k][i][j]
+                        continue
+                    silent = True
+                else:
+                    silent = False
+                x.sort()
+                channels[k][i][j][0] = x
+                j += 1
+    return channels
+
+
 def get_data(f):
     inst = get_instruments(f)
     ch, tpb = get_notes(f)
     ch = convert_to_lengths(ch)
-    return fix_timings(ch, tpb), inst
+    ch = fix_timings(ch, tpb)
+    ch = fix_values(ch)
+    return ch, inst
 
 
 def serialize_file(f):
     ch, inst = get_data(f)
     write_json(os.path.splitext(f)[0], inst, ch)
+
+
+def write_tokens(f, inst, channels):
+    song = {'Instruments': inst, 'Tokens': channels}
+    json_object = json.dumps(song)
+    with open("{0}.tokens".format(f), "w") as outfile:
+        outfile.write(json_object)
+
+
+def load_tokens(f):
+    data = json.load(open(f, 'r'))
+    inst = data['Instruments']
+    channels = data['Tokens']
+    return inst, channels
+
+
+def tokenize_json(f):
+    inst, channels = load_json(f)
+    token_channels, token_instruments = tokenize(inst, channels)
+    write_tokens(os.path.splitext(f)[0], token_instruments, token_channels)
 
 
 def write_json(f, inst, channels):
@@ -231,8 +287,167 @@ def load_json(f):
     data = json.load(open(f, 'r'))
     inst = data['Instruments']
     channels = data['Notes']
+    channels = fix_values(channels)
     return inst, channels
 
 
+def get_str_key(z):
+    return ','.join([':'.join(str(y) for y in x[0]) + '/' + '{0:g}'.format(x[1]) for x in z])
+
+
+def parse_str_key(x):
+    sequence = []
+    for y in x.split(','):
+        z = y.split('/')
+        if y[0] != '/':
+            notes = [int(note) for note in z[0].split(':')]
+            length = float(z[1])
+        else:
+            notes = []
+            length = float(z[1])
+        sequence.append([notes, length])
+    return sequence
+
+
+def join_str_keys(x, y):
+    return ','.join([x, y])
+
+
+def get_tokens(m, bar, initialize=False):
+    tokens = []
+    i = 0
+    best_x = None
+    x = None
+    while i < len(bar):
+        if x is None:
+            x = get_str_key([bar[i]])
+            i += 1
+        if x in m:
+            if i < len(bar):
+                best_x = x
+                x = join_str_keys(x, get_str_key([bar[i]]))
+                i += 1
+            else:
+                tokens.append(m[x])
+                best_x = None
+        elif initialize and not best_x:
+            m[x] = len(m)
+            tokens.append(m[x])
+            x = None
+        else:
+            tokens.append(m[best_x])
+            best_x = None
+            x = None
+            i -= 1
+
+    return tokens, m
+
+
+def get_token_maps(round):
+    token_map_file = "{0}\\token_map_{1}.json".format(out_dir, round)
+    if not os.path.isfile(token_map_file):
+        return None
+    return json.load(open(token_map_file, 'r'))
+
+
+def tokenize(inst, channels):
+    global token_maps
+    global token_maps_round
+    if not token_maps:
+        token_maps = get_token_maps(token_maps_round)
+    token_channels = {}
+    token_instruments = {}
+    for k in channels:
+        if k not in inst:
+            continue
+        midi_group = get_midi_group(inst[k][1])
+        if midi_group < 0:
+            continue
+        token_instruments[k] = midi_group
+        for bar in channels[k]:
+            token_channels[k].append(get_tokens(token_maps[midi_group], bar))
+    return token_channels, token_instruments
+
+
+def get_pairs_hist(channel, ms):
+    mm = ms[1]
+    m = ms[0]
+    initialize = ms[2]
+    for bar in channel:
+        tokens, m = get_tokens(m, bar, initialize)
+        for i in range(len(tokens) - 1):
+            pair = (tokens[i], tokens[i + 1])
+            if pair in mm:
+                mm[pair] += 1
+            else:
+                mm[pair] = 1
+    return ms
+
+
+def count_file(f, ms):
+    inst, channels = load_json(f)
+    for k in channels:
+        if k not in inst:
+            continue
+        midi_group = get_midi_group(inst[k][1])
+        if midi_group < 0:
+            continue
+        ms[midi_group] = get_pairs_hist(channels[k], ms[midi_group])
+
+
+def calc_entropy(m):
+    s = float(sum(list(m.values())))
+    p = [x / s for x in list(m.values())]
+    return sum([-math.log(x) * x for x in p])
+
+
+def iterate_counts(rounds):
+    token_map_file = None
+    token_map_index = 0
+    for i in reversed(range(rounds)):
+        if os.path.isfile("{0}\\token_map_{1}.json".format(out_dir, i)):
+            token_map_file = "{0}\\token_map_{1}.json".format(out_dir, i)
+            token_map_index = i + 1
+            break
+    ms = []
+    for i in range(4):
+        ms.append([{}, {}, True])
+    if token_map_file:
+        m = json.load(open(token_map_file, 'r'))
+        for i in range(4):
+            ms[i][0] = m[i]
+            ms[i][2] = False
+
+    for i in range(token_map_index, rounds):
+        iterate_all_files(count_file, param=ms)
+        e = []
+        for j in range(4):
+            e.append(calc_entropy(ms[j][1]))
+        for j in range(4):
+            y = [[ms[j][1][x], x] for x in ms[j][1]]
+            if y:
+                y.sort(reverse=True)
+                for k in range(min(10, len(y))):
+                    k1 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][0])]
+                    k2 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][1])]
+                    ms[j][0][join_str_keys(k1, k2)] = len(ms[j][0])
+            else:
+                print('error instrument', j)
+            ms[j][1] = {}
+            ms[j][2] = False
+        token_map_file = "{0}\\token_map_{1}.json".format(out_dir, i)
+        entropy_file = "{0}\\entropy_{1}.json".format(out_dir, i)
+        m = []
+        for j in range(4):
+            m.append(ms[j][0])
+        print(e)
+        with open(token_map_file, 'w') as outfile:
+            outfile.write(json.dumps(m))
+        with open(entropy_file, 'w') as outfile:
+            outfile.write(json.dumps(e))
+
+
 if __name__ == '__main__':
-    iterate_all_files(serialize_file, directory=part_dir)
+    token_maps = None
+    token_maps_round = 99
+    iterate_counts(token_maps_round + 1)
