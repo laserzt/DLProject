@@ -6,7 +6,6 @@ import random
 import json
 import math
 import glob
-import copy
 
 instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
                'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
@@ -31,6 +30,8 @@ instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand 
                'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet',
                'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
 
+midi_groups = 1
+
 
 def get_midi_group(x):
     if x < 8:  # piano
@@ -38,15 +39,15 @@ def get_midi_group(x):
     elif x < 16:  # Chromatic Percussion
         return -1
     elif x < 24:  # organ
-        return 0
+        return -1  # 0
     elif x < 32:  # Guitar
-        return 0
+        return -1  # 0
     elif x < 40:  # Bass
-        return 1
+        return -1  # 1
     elif x < 56:  # Strings
-        return 3
+        return -1  # 3
     elif x < 96:  # Solo
-        return 2
+        return -1  # 2
     elif x < 104:  # effects
         return -1
     elif x < 119:  # percussion
@@ -62,7 +63,8 @@ part_dir = 'C:\\lmd_full\\0'
 out_dir = 'C:\\Users\\Eleizerovich\\OneDrive - Gita Technologies LTD\\Desktop\\School\\DLProjectData'
 
 
-def iterate_all_files(func, file_type='.json', directory=part_dir, fail_func=lambda x: None, param=None, verbose=False,
+def iterate_all_files(func, file_type='.tokens', directory=part_dir, fail_func=lambda x: None, param=None,
+                      verbose=False,
                       prefix=None):
     if prefix:
         y = glob.glob(directory + '\\' + prefix + '*')
@@ -86,11 +88,14 @@ def iterate_all_files(func, file_type='.json', directory=part_dir, fail_func=lam
             iterate_all_files(func, file_type, f, fail_func)
 
 
-def get_random_file(dir_name=part_dir, file_type='.json'):
-    x = os.listdir(dir_name)
+def get_random_file(dir_name=part_dir, file_type='.tokens', prefix=None):
+    if prefix:
+        x = glob.glob(dir_name + '\\' + prefix + '*')
+    else:
+        x = glob.glob(dir_name + '\\*')
     while x:
         i = random.randint(0, len(x) - 1)
-        f = dir_name + '\\' + x[i]
+        f = x[i]
         if os.path.isfile(f):
             if os.path.splitext(f)[1] == file_type:
                 return f
@@ -127,64 +132,74 @@ def get_instruments(filename):
 
 def convert_to_lengths(channels):
     for k in channels.keys():
-        for j, bar in enumerate(channels[k]):
-            beats_per_bar = bar[0]
-            new_bar = [beats_per_bar]
-            if len(bar) > 1 and bar[1][1] > 0:
-                new_bar.append([[], bar[1][1]])
-            else:
-                new_bar.append([[], beats_per_bar])
-                channels[k][j] = new_bar
-                continue
-            for i in range(1, len(bar) - 1):
-                new_bar.append([bar[i][0], bar[i + 1][1] - bar[i][1]])
-            new_bar.append([bar[-1][0], beats_per_bar - sum([x[1] for x in new_bar[1:]])])
-            channels[k][j] = new_bar
+        if channels[k][0][1] != 0:
+            channels[k] = [[[], channels[k][0][1]]] + channels[k]
+        for i in range(1, len(channels[k])):
+            channels[k][i - 1][1] = channels[k][i][1] - channels[k][i - 1][1]
     return channels
+
+
+def write_midi(channel):
+    mid = mido.MidiFile()
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+
+    track.append(mido.Message('program_change', program=0, time=0))
+    t = 0
+    notes = []
+    tt = 0
+    for group in channel:
+        t = max(0, int(round(group[1] * mid.ticks_per_beat)))
+        t0 = t
+        for i, note in enumerate(group[0]):
+            ignore = False
+            for j, n in enumerate(notes):
+                if note == n[0]:
+                    n[1] = tt
+                    ignore = True
+                    break
+            if ignore:
+                continue
+            track.append(mido.Message('note_on', note=note, velocity=100, time=t0))
+            t0 = 0
+            notes.append([note, tt])
+        tt += t
+        i = 0
+        while i < len(notes):
+            if tt - notes[i][1] >= 2 * mid.ticks_per_beat:
+                track.append(mido.Message('note_off', note=notes[i][0], velocity=0, time=0))
+                del notes[i]
+            else:
+                i += 1
+        if t0:
+            track.append(mido.Message('note_off', note=1, velocity=0, time=t0))
+    mid.save(out_dir + '\\new_song.mid')
 
 
 def get_notes(filename):
     mid = mido.MidiFile(filename)
-    tempo = 500000
-    ticks_per_bar = 4 * mid.ticks_per_beat
-    next_ticks_per_bar = ticks_per_bar
     cum_ticks = 0
     channels = {}
-    ticks_in_bar = 0
-    bar = 0
-    last_bar = 0
-    bar_offset = 0
     ignore_ticks = 0
+    tempo = 500000
     for msg in mid:
         ticks = 0
         if msg.time > 0:
             ticks = int(round(mido.second2tick(msg.time, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)))
         if msg.type == 'set_tempo':
             tempo = msg.tempo
-        if msg.type == 'time_signature':
-            next_ticks_per_bar = msg.numerator * 4.0 / msg.denominator * mid.ticks_per_beat
         if ticks:
             ignore_ticks += ticks
-            if ignore_ticks >= mid.ticks_per_beat / 8.0:  # 32th notes
+            if ignore_ticks >= mid.ticks_per_beat / 8:  # 16th notes
                 cum_ticks += ignore_ticks
                 ignore_ticks = 0
-                ticks_in_bar = cum_ticks % ticks_per_bar
-                bar = bar_offset + int(cum_ticks / ticks_per_bar)
-                if bar > last_bar and next_ticks_per_bar != ticks_per_bar:
-                    bar_offset += int(cum_ticks / ticks_per_bar)
-                    cum_ticks = cum_ticks % ticks_per_bar
-                    ticks_per_bar = next_ticks_per_bar
-                last_bar = bar
         if msg.type == 'note_on':
             if msg.channel not in channels.keys():
                 channels[msg.channel] = []
-            if len(channels[msg.channel]) <= bar:
-                for i in range(1 + bar - len(channels[msg.channel])):
-                    channels[msg.channel].append([round(ticks_per_bar)])
-            if len(channels[msg.channel][bar]) <= 1 or channels[msg.channel][bar][-1][1] != ticks_in_bar:
-                channels[msg.channel][bar].append([[msg.note], ticks_in_bar])
-            elif channels[msg.channel][bar][-1][1] == ticks_in_bar:
-                channels[msg.channel][bar][-1][0].append(msg.note)
+            if len(channels[msg.channel]) == 0 or channels[msg.channel][-1][1] != cum_ticks:
+                channels[msg.channel].append([[msg.note], cum_ticks])
+            else:
+                channels[msg.channel][-1][0].append(msg.note)
     return channels, mid.ticks_per_beat
 
 
@@ -202,48 +217,42 @@ def get_best_round(x):
 
 def fix_timings(channels, ticks_per_beat):
     for k in channels:
-        for j, bar in enumerate(channels[k]):
-            err = 0
-            s = 0
-            for i, x in enumerate(bar[1:]):
-                d = (max(0.0, x[1] + err * 1.0 / (len(bar[1:]) - i)))
-                if i < len(bar[1:]) - 1:
-                    d = get_best_round(d * 1.0 / ticks_per_beat) * ticks_per_beat
-                else:
-                    d = bar[0] - s
-                channels[k][j][i + 1][1] = d / ticks_per_beat
-                s += d
-                err = x[1] - d
-            del channels[k][j][0]
+        err = 0
+        for i, x in enumerate(channels[k]):
+            d = (max(0.0, x[1] + err * 1.0 / (len(channels[k]) - i)))
+            d = get_best_round(d * 1.0 / ticks_per_beat) * ticks_per_beat
+            channels[k][i][1] = d / ticks_per_beat
+            err = x[1] - d
     return channels
 
 
 def fix_values(channels):
     for k in channels:
-        for i in range(len(channels[k])):
-            silent = False
-            j = 0
-            while j < len(channels[k][i]):
-                s = set()
-                for x in channels[k][i][j][0]:
-                    s.add(x)
-                x = list(s)
-                if not x:
-                    if silent:
-                        channels[k][i][j - 1][1] += channels[k][i][j][1]
-                        del channels[k][i][j]
-                        continue
-                    silent = True
-                else:
-                    silent = False
-                x.sort()
-                channels[k][i][j][0] = x
-                j += 1
+        silent = False
+        j = 0
+        while j < len(channels[k]):
+            s = set()
+            for x in channels[k][j][0]:
+                s.add(x)
+            x = list(s)
+            if not x:
+                if silent:
+                    channels[k][j - 1][1] += channels[k][j][1]
+                    del channels[k][j]
+                    continue
+                silent = True
+            else:
+                silent = False
+            x.sort()
+            channels[k][j][0] = x
+            j += 1
     return channels
 
 
 def get_data(f):
     inst = get_instruments(f)
+    if len(list(inst)) != 1 or list(inst)[0] >= 8:
+        return None, None
     ch, tpb = get_notes(f)
     ch = convert_to_lengths(ch)
     ch = fix_timings(ch, tpb)
@@ -253,7 +262,8 @@ def get_data(f):
 
 def serialize_file(f):
     ch, inst = get_data(f)
-    write_json(os.path.splitext(f)[0], inst, ch)
+    if ch is not None:
+        write_json(os.path.splitext(f)[0], inst, ch)
 
 
 def write_tokens(f, inst, channels):
@@ -287,8 +297,13 @@ def load_json(f):
     data = json.load(open(f, 'r'))
     inst = data['Instruments']
     channels = data['Notes']
-    channels = fix_values(channels)
     return inst, channels
+
+
+def fix_json(f):
+    inst, channels = json(f)
+    channels = fix_values(channels)
+    write_json(os.path.splitext(f)[0], inst, channels)
 
 
 def get_str_key(z, note_diff):
@@ -340,7 +355,7 @@ def get_tokens(m, bar, note_diff=0, initialize=False):
             x = None
             i -= 1
 
-    return tokens, m
+    return tokens
 
 
 def get_token_maps(round):
@@ -364,27 +379,40 @@ def tokenize(inst, channels):
         if midi_group < 0:
             continue
         token_instruments[k] = midi_group
-        for bar in channels[k]:
-            token_channels[k].append(get_tokens(token_maps[midi_group], bar))
+        token_channels[k] = get_tokens(token_maps[midi_group], channels[k])
+
     return token_channels, token_instruments
 
 
-def get_pairs_hist(channel, ms, note_diff):
+def detokenize(tokens):
+    global token_maps
+    global token_maps_round
+    if not token_maps:
+        token_maps = get_token_maps(token_maps_round)
+    channel = []
+    for t in tokens:
+        channel += parse_str_key(list(token_maps[0].keys())[list(token_maps[0].values()).index(int(t))])
+    return channel
+
+
+def get_pairs_hist(bars, ms, note_diff):
     mm = ms[1]
     m = ms[0]
     initialize = ms[2]
-    for bar in channel:
-        tokens, m = get_tokens(m, bar, note_diff, initialize)
-        for i in range(len(tokens) - 1):
-            pair = (tokens[i], tokens[i + 1])
-            if pair in mm:
-                mm[pair] += 1
-            else:
-                mm[pair] = 1
-    return ms
+    tokens = get_tokens(m, bars, note_diff, initialize)
+    for i in range(len(tokens) - 1):
+        pair = (tokens[i], tokens[i + 1])
+        if pair in mm:
+            mm[pair] += 1
+        else:
+            mm[pair] = 1
+    return [m, mm, initialize]
 
 
 def count_file(f, ms):
+    #channels, inst = get_data(f)
+    #if channels is None:
+    #    return
     inst, channels = load_json(f)
     for k in channels:
         if k not in inst:
@@ -402,7 +430,7 @@ def calc_entropy(m):
     return sum([-math.log(x) * x for x in p])
 
 
-def iterate_counts(rounds):
+def iterate_counts(rounds, prefix='0'):
     token_map_file = None
     token_map_index = 0
     for i in reversed(range(rounds)):
@@ -411,27 +439,33 @@ def iterate_counts(rounds):
             token_map_index = i + 1
             break
     ms = []
-    for i in range(4):
+    for i in range(midi_groups):
         ms.append([{}, {}, True])
     if token_map_file:
         m = json.load(open(token_map_file, 'r'))
-        for i in range(4):
+        for i in range(midi_groups):
             ms[i][0] = m[i]
             ms[i][2] = False
 
     for i in range(token_map_index, rounds):
-        iterate_all_files(count_file, param=ms)
+        iterate_all_files(count_file, directory=part_dir, file_type='.json', param=ms, prefix=prefix)
         e = []
-        for j in range(4):
+        y = []
+        for j in range(midi_groups):
             e.append(calc_entropy(ms[j][1]))
-        for j in range(4):
             y = [[ms[j][1][x], x] for x in ms[j][1]]
             if y:
                 y.sort(reverse=True)
-                for k in range(min(48, len(y))):
+                k = 0
+                while k < min(48, len(y)):
                     k1 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][0])]
                     k2 = list(ms[j][0].keys())[list(ms[j][0].values()).index(y[k][1][1])]
-                    ms[j][0][join_str_keys(k1, k2)] = len(ms[j][0])
+                    k3 = join_str_keys(k1, k2)
+                    if k3 in ms[j][0]:
+                        del y[k]
+                        continue
+                    ms[j][0][k3] = len(ms[j][0])
+                    k += 1
             else:
                 print('error instrument', j)
             ms[j][1] = {}
@@ -439,9 +473,9 @@ def iterate_counts(rounds):
         token_map_file = "{0}\\token_map_{1}.json".format(out_dir, i)
         entropy_file = "{0}\\entropy_{1}.json".format(out_dir, i)
         m = []
-        for j in range(4):
+        for j in range(midi_groups):
             m.append(ms[j][0])
-        print(e)
+        print(e, len(y))
         with open(token_map_file, 'w') as outfile:
             outfile.write(json.dumps(m))
         with open(entropy_file, 'w') as outfile:
@@ -451,4 +485,21 @@ def iterate_counts(rounds):
 if __name__ == '__main__':
     token_maps = None
     token_maps_round = 99
+    iterate_all_files(serialize_file, file_type='.mid')
     iterate_counts(token_maps_round + 1)
+    iterate_all_files(tokenize_json, file_type='.json')
+    # f = get_random_file(prefix='000', file_type='.tokens')
+    # print(f)
+    #f = 'C:\\lmd_full\\0\\000902bf7e1e85540a5e8d864196748f.tokens'
+    #f = 'C:\\lmd_full\\0\\00012722c199ae2a628ebb792ccc617a.tokens'
+    #inst, tokens = load_tokens(f)
+    # for k in ch:
+    #    print(ch[k])
+    #channels = {}
+    #for k in tokens:
+    #    channels[k] = detokenize(tokens[k])
+    #    print(channels[k])
+    #    write_midi(channels[k])
+    #    break
+    #play_midi(out_dir + '\\new_song.mid')
+    #play_midi(os.path.splitext(f)[0] + '.mid')
