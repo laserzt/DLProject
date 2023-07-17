@@ -190,7 +190,7 @@ def get_notes(filename):
             tempo = msg.tempo
         if ticks:
             ignore_ticks += ticks
-            if ignore_ticks >= mid.ticks_per_beat / 8:  # 16th notes
+            if ignore_ticks >= mid.ticks_per_beat / 8:  # 32th notes
                 cum_ticks += ignore_ticks
                 ignore_ticks = 0
         if msg.type == 'note_on':
