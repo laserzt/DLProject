@@ -583,7 +583,7 @@ def read_notes_map(f):
     instr = get_instruments(f)
     channels = []
     real_instruments = []
-    for k in instruments:
+    for k in instr:
         midi_group = get_midi_group(instr[k][1])
         if midi_group >= 0:
             channels.append(k)
