@@ -32,7 +32,7 @@ instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand 
                'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet',
                'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
 
-midi_groups = 1
+midi_groups = 4
 
 
 def get_midi_group(x):
