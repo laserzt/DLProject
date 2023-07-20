@@ -7,7 +7,6 @@ import json
 import math
 import glob
 import threading
-import numpy as np
 
 instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
                'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
@@ -64,9 +63,9 @@ part_dir = '/home/producer/lmd_full/0'
 out_dir = '/home/producer/School/Data'
 
 
-def iterate_all_files(func, file_type='.tokens', directory=full_dir, fail_func=lambda x: None, param=None,
+def iterate_all_files(func, file_type='.mid', directory=part_dir, fail_func=lambda x: None, param=None,
                       verbose=False,
-                      prefix=None, run_in_threads=True):
+                      prefix=None, run_in_threads=False):
     if run_in_threads:
         for i in range(16):
             if prefix:
@@ -161,11 +160,13 @@ def write_midi_maps(midi_maps, instruments):
     mid.tracks.append(track)
 
     num_channels = len(midi_maps)
-    midi_len = midi_maps[0].shape[0]
+    midi_len = len(midi_maps[0])
 
     for i in range(num_channels):
         track.append(mido.Message('program_change', channel=i, program=instruments[i], time=0))
-    notes = np.zeros((num_channels, 128))
+    notes = []
+    for i in range(num_channels):
+        notes.append([0]*128)
 
     t = 0
     for i in range(midi_len):
@@ -226,9 +227,11 @@ def get_notes_map(filename, channels_to_get):
     channels_index = {}
     tempo = 500000
     mid_len = int(
-        np.ceil(mido.second2tick(mid.length, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)) / mid.ticks_per_beat * 16)
+        math.ceil(mido.second2tick(mid.length, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)) / mid.ticks_per_beat * 16)
     for i in range(len(channels_to_get)):
-        channels.append(np.zeros((mid_len, 128)))
+        channels.append([])
+        for j in range(mid_len):
+            channels[-1].append([0]*128)
         channels_index[channels_to_get[i]] = i
     cur_place = 0
     mono_channels = []
@@ -244,7 +247,8 @@ def get_notes_map(filename, channels_to_get):
                 cur_place += 1
                 if mid_len <= cur_place:
                     for ch in range(len(channels)):
-                        channels[ch] = np.append(channels[ch], np.zeros((8, 128)), axis=0)
+                        for j in range(8):
+                            channels[ch][-1].append([0]*128)
                     mid_len += 8
                 for note in range(128):
                     for ch in range(len(channels)):
@@ -268,7 +272,8 @@ def get_notes_map(filename, channels_to_get):
                 for note in range(128):
                     channels[ch][cur_place][note] = 0
     for ch in range(len(channels)):
-        channels[ch] = np.delete(channels[ch], range(cur_place + 1, mid_len), 0)
+        for i in range(mid_len-1, cur_place, -1):
+            del channels[ch][i]
     return channels
 
 
@@ -594,13 +599,19 @@ def read_notes_map(f):
         return [], []
 
 
+def serialize_notes_map(f):
+    channels, instruments = read_notes_map(f)
+    if channels:
+        write_json(os.path.splitext(f)[0], channels, instruments)
+
+
 if __name__ == '__main__':
     token_maps = None
     token_maps_round = 99
-    # iterate_all_files(serialize_file, file_type='.mid')
+    iterate_all_files(serialize_file, file_type='.mid', prefix='000')
     # iterate_counts(token_maps_round + 1)
     # iterate_all_files(tokenize_json, file_type='.json')
-    f = get_random_file(prefix='0', file_type='.mid')
-    maps, instruments = read_notes_map(f)
-    if maps:
-        write_midi_maps(maps, instruments)
+    #f = get_random_file(prefix='0', file_type='.mid')
+    #maps, instruments = read_notes_map(f)
+    #if maps:
+    #    write_midi_maps(maps, instruments)
