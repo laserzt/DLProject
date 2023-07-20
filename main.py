@@ -7,6 +7,7 @@ import json
 import math
 import glob
 import threading
+import gzip
 
 instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
                'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
@@ -31,7 +32,7 @@ instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand 
                'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet',
                'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
 
-midi_groups = 4
+midi_groups = 1
 
 
 def get_midi_group(x):
@@ -57,10 +58,10 @@ def get_midi_group(x):
         return -1
 
 
-full_dir = '/home/producer/lmd_full'
-part_dir = '/home/producer/lmd_full/0'
-
-out_dir = '/home/producer/School/Data'
+home_dir = '/home/producer'
+full_dir = os.path.join(home_dir, 'lmd_full')
+part_dir = os.path.join(full_dir, '0')
+out_dir = os.path.join(home_dir, 'School', 'Data')
 
 
 def iterate_all_files(func, file_type='.mid', directory=part_dir, fail_func=lambda x: None, param=None,
@@ -79,12 +80,12 @@ def iterate_all_files(func, file_type='.mid', directory=part_dir, fail_func=lamb
         return
     if prefix:
         if verbose:
-            print('iterate ', directory + '/' + prefix)
-        y = glob.glob(directory + '/' + prefix + '*')
+            print('iterate ', os.path.join(directory, prefix))
+        y = glob.glob(os.path.join(directory, prefix + '*'))
     else:
         if verbose:
             print('iterate ', directory)
-        y = glob.glob(directory + '/*')
+        y = glob.glob(os.path.join(directory, '*'))
     for f in y:
         if os.path.isfile(f):
             if os.path.splitext(f)[1] == file_type:
@@ -105,9 +106,9 @@ def iterate_all_files(func, file_type='.mid', directory=part_dir, fail_func=lamb
 
 def get_random_file(dir_name=part_dir, file_type='.tokens', prefix=None):
     if prefix:
-        x = glob.glob(dir_name + '/' + prefix + '*')
+        x = glob.glob(os.path.join(dir_name, prefix + '*'))
     else:
-        x = glob.glob(dir_name + '/*')
+        x = glob.glob(os.path.join(dir_name, '*'))
     while x:
         i = random.randint(0, len(x) - 1)
         f = x[i]
@@ -166,7 +167,7 @@ def write_midi_maps(midi_maps, instruments):
         track.append(mido.Message('program_change', channel=i, program=instruments[i], time=0))
     notes = []
     for i in range(num_channels):
-        notes.append([0]*128)
+        notes.append([0] * 128)
 
     t = 0
     for i in range(midi_len):
@@ -180,7 +181,7 @@ def write_midi_maps(midi_maps, instruments):
                     t = 0
                     notes[k][j] = midi_maps[k][i][j]
         t += mid.ticks_per_beat / 8
-    mid.save(out_dir + '/new_song.mid')
+    mid.save(os.path.join(out_dir, 'new_song.mid'))
 
 
 def write_midi(channel):
@@ -217,7 +218,7 @@ def write_midi(channel):
                 i += 1
         if t0:
             track.append(mido.Message('note_off', note=1, velocity=0, time=t0))
-    mid.save(out_dir + '/new_song.mid')
+    mid.save(os.path.join(out_dir, 'new_song.mid'))
 
 
 def get_notes_map(filename, channels_to_get):
@@ -227,11 +228,12 @@ def get_notes_map(filename, channels_to_get):
     channels_index = {}
     tempo = 500000
     mid_len = int(
-        math.ceil(mido.second2tick(mid.length, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)) / mid.ticks_per_beat * 16)
+        math.ceil(
+            mido.second2tick(mid.length, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)) / mid.ticks_per_beat * 16)
     for i in range(len(channels_to_get)):
         channels.append([])
         for j in range(mid_len):
-            channels[-1].append([0]*128)
+            channels[-1].append([0] * 128)
         channels_index[channels_to_get[i]] = i
     cur_place = 0
     mono_channels = []
@@ -248,7 +250,7 @@ def get_notes_map(filename, channels_to_get):
                 if mid_len <= cur_place:
                     for ch in range(len(channels)):
                         for j in range(8):
-                            channels[ch][-1].append([0]*128)
+                            channels[ch][-1].append([0] * 128)
                     mid_len += 8
                 for note in range(128):
                     for ch in range(len(channels)):
@@ -272,36 +274,64 @@ def get_notes_map(filename, channels_to_get):
                 for note in range(128):
                     channels[ch][cur_place][note] = 0
     for ch in range(len(channels)):
-        for i in range(mid_len-1, cur_place, -1):
+        for i in range(mid_len - 1, cur_place, -1):
             del channels[ch][i]
     return channels
 
 
-def get_notes(filename):
-    mid = mido.MidiFile(filename)
-    cum_ticks = 0
-    channels = {}
-    ignore_ticks = 0
-    tempo = 500000
-    for msg in mid:
-        ticks = 0
-        if msg.time > 0:
-            ticks = int(round(mido.second2tick(msg.time, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)))
-        if msg.type == 'set_tempo':
-            tempo = msg.tempo
-        if ticks:
-            ignore_ticks += ticks
-            if ignore_ticks >= mid.ticks_per_beat / 8:  # 32th notes
-                cum_ticks += ignore_ticks
-                ignore_ticks = 0
-        if msg.type == 'note_on':
-            if msg.channel not in channels.keys():
-                channels[msg.channel] = []
-            if len(channels[msg.channel]) == 0 or channels[msg.channel][-1][1] != cum_ticks:
-                channels[msg.channel].append([[msg.note], cum_ticks])
-            else:
-                channels[msg.channel][-1][0].append(msg.note)
-    return channels, mid.ticks_per_beat
+def get_notes(filename, channels):
+    m = get_notes_map(filename, channels)
+    if len(m) > 1:
+        channel = []
+        for i in range(len(m[0])):
+            channel.append([0] * 128)
+    elif len(m) == 1:
+        channel = m[0]
+    else:
+        return []
+
+    t = 0
+    last_n = None
+    res = []
+    for i in range(len(channel)):
+        n = []
+        for j in range(128):
+            if channel[i][j]:
+                n.append(j)
+        if last_n == n:
+            t += 1
+        elif last_n is not None:
+            res.append([last_n, t])
+            t = 0
+        last_n = n
+    return res
+
+
+# def get_notes(filename):
+#    mid = mido.MidiFile(filename)
+#    cum_ticks = 0
+#    channels = {}
+#    ignore_ticks = 0
+#    tempo = 500000
+#    for msg in mid:
+#        ticks = 0
+#        if msg.time > 0:
+#            ticks = int(round(mido.second2tick(msg.time, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)))
+#        if msg.type == 'set_tempo':
+#            tempo = msg.tempo
+#        if ticks:
+#            ignore_ticks += ticks
+#            if ignore_ticks >= mid.ticks_per_beat / 8:  # 32th notes
+#                cum_ticks += ignore_ticks
+#                ignore_ticks = 0
+#        if msg.type == 'note_on':
+#            if msg.channel not in channels.keys():
+#                channels[msg.channel] = []
+#            if len(channels[msg.channel]) == 0 or channels[msg.channel][-1][1] != cum_ticks:
+#                channels[msg.channel].append([[msg.note], cum_ticks])
+#            else:
+#                channels[msg.channel][-1][0].append(msg.note)
+#    return channels, mid.ticks_per_beat
 
 
 def check_midi_file(filename):
@@ -351,14 +381,22 @@ def fix_values(channels):
 
 
 def get_data(f):
-    inst = get_instruments(f)
-    if len(list(inst)) != 1 or list(inst)[0] >= 8:
-        return None, None
-    ch, tpb = get_notes(f)
-    ch = convert_to_lengths(ch)
-    ch = fix_timings(ch, tpb)
-    ch = fix_values(ch)
-    return ch, inst
+    instr = get_instruments(f)
+    channels = []
+    real_instruments = []
+    single_group = -1
+    for k in instr:
+        midi_group = get_midi_group(instr[k][1])
+        if midi_group >= 0:
+            if single_group >= 0 and single_group != instr[k][1]:
+                return [], []
+            single_group = instr[k][1]
+            channels.append(k)
+            real_instruments.append(instr[k][1])
+    if channels:
+        return get_notes(f, channels), real_instruments
+    else:
+        return [], []
 
 
 def serialize_file(f):
@@ -390,21 +428,20 @@ def tokenize_json(f):
 def write_json(f, inst, channels):
     song = {'Instruments': inst, 'Notes': channels}
     json_object = json.dumps(song)
-    with open("{0}.json".format(f), "w") as outfile:
-        outfile.write(json_object)
+    json_bytes = json_object.encode('utf-8')
+
+    with gzip.open("{0}.json".format(f), "w") as outfile:
+        outfile.write(json_bytes)
 
 
 def load_json(f):
-    data = json.load(open(f, 'r'))
+    with gzip.open(f, 'r') as infile:
+        json_bytes = infile.read()
+    json_object = json_bytes.decode('utf-8')
+    data = json.loads(json_object)
     inst = data['Instruments']
     channels = data['Notes']
     return inst, channels
-
-
-def fix_json(f):
-    inst, channels = json(f)
-    channels = fix_values(channels)
-    write_json(os.path.splitext(f)[0], inst, channels)
 
 
 def get_str_key(z, note_diff):
@@ -460,7 +497,7 @@ def get_tokens(m, bar, note_diff=0, initialize=False):
 
 
 def get_token_maps(round):
-    token_map_file = "{0}/token_map_{1}.json".format(out_dir, round)
+    token_map_file = os.path.join(out_dir, "token_map_{0}.json".format(round))
     if not os.path.isfile(token_map_file):
         return None
     return json.load(open(token_map_file, 'r'))
@@ -535,8 +572,8 @@ def iterate_counts(rounds, prefix=None):
     token_map_file = None
     token_map_index = 0
     for i in reversed(range(rounds)):
-        if os.path.isfile("{0}/token_map_{1}.json".format(out_dir, i)):
-            token_map_file = "{0}/token_map_{1}.json".format(out_dir, i)
+        if os.path.isfile(os.path.join(out_dir, 'token_map_{0}.json'.format(i))):
+            token_map_file = os.path.join(out_dir, "token_map_{0}.json".format(i))
             token_map_index = i + 1
             break
     ms = []
@@ -572,8 +609,8 @@ def iterate_counts(rounds, prefix=None):
                 print('error instrument', j)
             ms[j][1] = {}
             ms[j][2] = False
-        token_map_file = "{0}/token_map_{1}.json".format(out_dir, i)
-        entropy_file = "{0}/entropy_{1}.json".format(out_dir, i)
+        token_map_file = os.path.join(out_dir, "token_map_{0}.json".format(i))
+        entropy_file = os.path.join("entropy_{0}.json".format(i))
         m = []
         for j in range(midi_groups):
             m.append(ms[j][0])
@@ -608,10 +645,10 @@ def serialize_notes_map(f):
 if __name__ == '__main__':
     token_maps = None
     token_maps_round = 99
-    iterate_all_files(serialize_file, file_type='.mid', prefix='000')
+    iterate_all_files(load_json, file_type='.json', prefix='000')
     # iterate_counts(token_maps_round + 1)
     # iterate_all_files(tokenize_json, file_type='.json')
-    #f = get_random_file(prefix='0', file_type='.mid')
-    #maps, instruments = read_notes_map(f)
-    #if maps:
+    # f = get_random_file(prefix='0', file_type='.mid')
+    # maps, instruments = read_notes_map(f)
+    # if maps:
     #    write_midi_maps(maps, instruments)
