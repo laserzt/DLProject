@@ -9,35 +9,46 @@ import glob
 import threading
 import gzip
 
-instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
-               'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
-               'Music Box', 'Vibraphone', 'Marimba', 'Xylophone', 'Tubular Bells', 'Dulcimer', 'Drawbar Organ',
-               'Percussive Organ', 'Rock Organ', 'Church Organ', 'Reed Organ', 'Accordion', 'Harmonica',
-               'Tango Accordion', 'Acoustic Guitar (nylon)', 'Acoustic Guitar (steel)', 'Electric Guitar (jazz)',
-               'Electric Guitar (clean)', 'Electric Guitar (muted)', 'Overdriven Guitar', 'Distortion Guitar',
-               'Guitar harmonics', 'Acoustic Bass', 'Electric Bass (finger)', 'Electric Bass (pick)',
-               'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2', 'Synth Bass 1', 'Synth Bass 2', 'Violin', 'Viola',
-               'Cello', 'Contrabass', 'Tremolo Strings', 'Pizzicato Strings', 'Orchestral Harp', 'Timpani',
-               'String Ensemble 1', 'String Ensemble 2', 'Synth Strings 1', 'Synth Strings 2', 'Choir Aahs',
-               'Voice Oohs', 'Synth Voice', 'Orchestra Hit', 'Trumpet', 'Trombone', 'Tuba', 'Muted Trumpet',
-               'French Horn', 'Brass Section', 'Synth Brass 1', 'Synth Brass 2', 'Soprano Sax', 'Alto Sax',
-               'Tenor Sax', 'Baritone Sax', 'Oboe', 'English Horn', 'Bassoon', 'Clarinet', 'Piccolo', 'Flute',
-               'Recorder', 'Pan Flute', 'Blown Bottle', 'Shakuhachi', 'Whistle', 'Ocarina', 'Lead 1 (square)',
-               'Lead 2 (sawtooth)', 'Lead 3 (calliope)', 'Lead 4 (chiff)', 'Lead 5 (charang)', 'Lead 6 (voice)',
-               'Lead 7 (fifths)', 'Lead 8 (bass + lead)', 'Pad 1 (new age)', 'Pad 2 (warm)', 'Pad 3 (polysynth)',
-               'Pad 4 (choir)', 'Pad 5 (bowed)', 'Pad 6 (metallic)', 'Pad 7 (halo)', 'Pad 8 (sweep)', 'FX 1 (rain)',
-               'FX 2 (soundtrack)', 'FX 3 (crystal)', 'FX 4 (atmosphere)', 'FX 5 (brightness)', 'FX 6 (goblins)',
-               'FX 7 (echoes)', 'FX 8 (sci-fi)', 'Sitar', 'Banjo', 'Shamisen', 'Koto', 'Kalimba', 'Bag pipe',
-               'Fiddle', 'Shanai', 'Tinkle Bell', 'Agogo', 'Steel Drums', 'Woodblock', 'Taiko Drum', 'Melodic Tom',
-               'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet',
-               'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
+midi_instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
+                    'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet', 'Celesta', 'Glockenspiel',
+                    'Music Box', 'Vibraphone', 'Marimba', 'Xylophone', 'Tubular Bells', 'Dulcimer', 'Drawbar Organ',
+                    'Percussive Organ', 'Rock Organ', 'Church Organ', 'Reed Organ', 'Accordion', 'Harmonica',
+                    'Tango Accordion', 'Acoustic Guitar (nylon)', 'Acoustic Guitar (steel)', 'Electric Guitar (jazz)',
+                    'Electric Guitar (clean)', 'Electric Guitar (muted)', 'Overdriven Guitar', 'Distortion Guitar',
+                    'Guitar harmonics', 'Acoustic Bass', 'Electric Bass (finger)', 'Electric Bass (pick)',
+                    'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2', 'Synth Bass 1', 'Synth Bass 2', 'Violin', 'Viola',
+                    'Cello', 'Contrabass', 'Tremolo Strings', 'Pizzicato Strings', 'Orchestral Harp', 'Timpani',
+                    'String Ensemble 1', 'String Ensemble 2', 'Synth Strings 1', 'Synth Strings 2', 'Choir Aahs',
+                    'Voice Oohs', 'Synth Voice', 'Orchestra Hit', 'Trumpet', 'Trombone', 'Tuba', 'Muted Trumpet',
+                    'French Horn', 'Brass Section', 'Synth Brass 1', 'Synth Brass 2', 'Soprano Sax', 'Alto Sax',
+                    'Tenor Sax', 'Baritone Sax', 'Oboe', 'English Horn', 'Bassoon', 'Clarinet', 'Piccolo', 'Flute',
+                    'Recorder', 'Pan Flute', 'Blown Bottle', 'Shakuhachi', 'Whistle', 'Ocarina', 'Lead 1 (square)',
+                    'Lead 2 (sawtooth)', 'Lead 3 (calliope)', 'Lead 4 (chiff)', 'Lead 5 (charang)', 'Lead 6 (voice)',
+                    'Lead 7 (fifths)', 'Lead 8 (bass + lead)', 'Pad 1 (new age)', 'Pad 2 (warm)', 'Pad 3 (polysynth)',
+                    'Pad 4 (choir)', 'Pad 5 (bowed)', 'Pad 6 (metallic)', 'Pad 7 (halo)', 'Pad 8 (sweep)',
+                    'FX 1 (rain)',
+                    'FX 2 (soundtrack)', 'FX 3 (crystal)', 'FX 4 (atmosphere)', 'FX 5 (brightness)', 'FX 6 (goblins)',
+                    'FX 7 (echoes)', 'FX 8 (sci-fi)', 'Sitar', 'Banjo', 'Shamisen', 'Koto', 'Kalimba', 'Bag pipe',
+                    'Fiddle', 'Shanai', 'Tinkle Bell', 'Agogo', 'Steel Drums', 'Woodblock', 'Taiko Drum', 'Melodic Tom',
+                    'Synth Drum', 'Reverse Cymbal', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet',
+                    'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
+GAN = True
+home_dir = 'c:\\'  # ''/home/producer'
+full_dir = os.path.join(home_dir, 'lmd_full')
+part_dir = os.path.join(full_dir, '0')
+out_dir = os.path.join(home_dir, 'School', 'Data')
 
-midi_groups = 4
+if GAN:
+    midi_groups = 4
+else:
+    midi_groups = 1
 
 
 def get_midi_group(x):
     if x < 8:  # piano
         return 0
+    elif not GAN:
+        return -1
     elif x < 16:  # Chromatic Percussion
         return -1
     elif x < 24:  # organ
@@ -56,12 +67,6 @@ def get_midi_group(x):
         return 3
     else:  # effects
         return -1
-
-
-home_dir = '/home/producer'
-full_dir = os.path.join(home_dir, 'lmd_full')
-part_dir = os.path.join(full_dir, '0')
-out_dir = os.path.join(home_dir, 'School', 'Data')
 
 
 def iterate_all_files(func, file_type='.mid', directory=part_dir, fail_func=lambda x: None, param=None,
@@ -142,7 +147,7 @@ def get_instruments(filename):
     res = {}
     for msg in mid:
         if msg.type == 'program_change':
-            res[msg.channel] = (instruments[msg.program], msg.program)
+            res[msg.channel] = (midi_instruments[msg.program], msg.program)
     return res
 
 
@@ -180,7 +185,7 @@ def write_midi_maps(midi_maps, instruments):
                         track.append(mido.Message('note_off', channel=k, note=j, time=round(t), velocity=0))
                     t = 0
                     notes[k][j] = midi_maps[k][i][j]
-        t += mid.ticks_per_beat / 8
+        t += mid.ticks_per_beat / 4
     mid.save(os.path.join(out_dir, 'new_song.mid'))
 
 
@@ -276,15 +281,19 @@ def get_notes_map(filename, channels_to_get):
     for ch in range(len(channels)):
         for i in range(mid_len - 1, cur_place, -1):
             del channels[ch][i]
-    return channels
+    return channels, mid.ticks_per_beat
 
 
 def get_notes(filename, channels):
-    m = get_notes_map(filename, channels)
+    m, ticks_per_beat = get_notes_map(filename, channels)
     if len(m) > 1:
         channel = []
         for i in range(len(m[0])):
             channel.append([0] * 128)
+        for x in m:
+            for i in range(len(x)):
+                for j in range(128):
+                    channel[i][j] = channel[i][j] | x[i][j]
     elif len(m) == 1:
         channel = m[0]
     else:
@@ -292,19 +301,20 @@ def get_notes(filename, channels):
 
     t = 0
     last_n = None
-    res = []
+    res = {}
+    res[0] = []
     for i in range(len(channel)):
         n = []
         for j in range(128):
             if channel[i][j]:
                 n.append(j)
         if last_n == n:
-            t += 1
+            t += ticks_per_beat / 8
         elif last_n is not None:
-            res.append([last_n, t])
-            t = 0
+            res[0].append([last_n, t])
+            t = ticks_per_beat / 8
         last_n = n
-    return res
+    return res, ticks_per_beat
 
 
 # def get_notes(filename):
@@ -339,8 +349,8 @@ def check_midi_file(filename):
 
 
 def get_best_round(x):
-    y1 = math.ceil(x * 8) / 8  # 32th notes
-    y2 = math.ceil(x * 6) / 6  # 8th triplets
+    y1 = round(x * 8) / 8  # 32th notes
+    y2 = round(x * 6) / 6  # 8th triplets
     if abs(x - y1) < abs(x - y2):
         return y1
     return y2
@@ -362,6 +372,9 @@ def fix_values(channels):
         silent = False
         j = 0
         while j < len(channels[k]):
+            if channels[k][j][1] == 0:
+                del channels[k][j]
+                continue
             s = set()
             for x in channels[k][j][0]:
                 s.add(x)
@@ -382,26 +395,31 @@ def fix_values(channels):
 
 def get_data(f):
     instr = get_instruments(f)
+    if len(instr) > 2:
+        return [], []
+    instruments = {}
     channels = []
-    real_instruments = []
-    single_group = -1
+    single_instr = -1
     for k in instr:
+        if single_instr >= 0 and single_instr != instr[k][1]:
+            return [], []
+        single_instr = instr[k][1]
+        instruments[k] = instr[k]
         midi_group = get_midi_group(instr[k][1])
         if midi_group >= 0:
-            if single_group >= 0 and single_group != instr[k][1]:
-                return [], []
-            single_group = instr[k][1]
             channels.append(k)
-            real_instruments.append(instr[k][1])
     if channels:
-        return get_notes(f, channels), real_instruments
+        channels, ticks_per_beat = get_notes(f, channels)
+        channels = fix_timings(channels, ticks_per_beat)
+        channels = fix_values(channels)
+        return channels, instruments
     else:
         return [], []
 
 
 def serialize_file(f):
     ch, inst = get_data(f)
-    if ch is not None:
+    if ch:
         write_json(os.path.splitext(f)[0], inst, ch)
 
 
@@ -631,7 +649,7 @@ def read_notes_map(f):
             channels.append(k)
             real_instruments.append(instr[k][1])
     if channels:
-        return get_notes_map(f, channels), real_instruments
+        return get_notes_map(f, channels)[0], real_instruments
     else:
         return [], []
 
@@ -645,10 +663,16 @@ def serialize_notes_map(f):
 if __name__ == '__main__':
     token_maps = None
     token_maps_round = 99
-    iterate_all_files(load_json, file_type='.json', prefix='000')
+    # iterate_all_files(serialize_file, file_type='.mid', prefix='000', directory=part_dir)
     # iterate_counts(token_maps_round + 1)
     # iterate_all_files(tokenize_json, file_type='.json')
-    # f = get_random_file(prefix='0', file_type='.mid')
-    # maps, instruments = read_notes_map(f)
-    # if maps:
-    #    write_midi_maps(maps, instruments)
+    maps = None
+    while not maps:
+        # f = get_random_file(prefix='0', file_type='.mid', dir_name=part_dir)
+        f = 'c:\\lmd_full\\0\\0551759d33d7063da9c472e2fcae264c.mid'
+        maps, instruments = get_data(f)
+        if maps:
+            print(f)
+            write_midi(maps[0])
+    play_midi(f)
+    # play_midi(os.path.join(out_dir, 'new_song.mid'))
