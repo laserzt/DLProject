@@ -255,7 +255,7 @@ def get_notes_map(filename, channels_to_get):
                 if mid_len <= cur_place:
                     for ch in range(len(channels)):
                         for j in range(8):
-                            channels[ch][-1].append([0] * 128)
+                            channels[ch].append([0] * 128)
                     mid_len += 8
                 for note in range(128):
                     for ch in range(len(channels)):
@@ -663,16 +663,10 @@ def serialize_notes_map(f):
 if __name__ == '__main__':
     token_maps = None
     token_maps_round = 99
-    # iterate_all_files(serialize_file, file_type='.mid', prefix='000', directory=part_dir)
+    iterate_all_files(serialize_file, file_type='.mid')
     # iterate_counts(token_maps_round + 1)
     # iterate_all_files(tokenize_json, file_type='.json')
-    maps = None
-    while not maps:
-        # f = get_random_file(prefix='0', file_type='.mid', dir_name=part_dir)
-        f = 'c:\\lmd_full\\0\\0551759d33d7063da9c472e2fcae264c.mid'
-        maps, instruments = get_data(f)
-        if maps:
-            print(f)
-            write_midi(maps[0])
-    play_midi(f)
-    # play_midi(os.path.join(out_dir, 'new_song.mid'))
+    # f = get_random_file(prefix='0', file_type='.mid')
+    # maps, instruments = read_notes_map(f)
+    # if maps:
+    #    write_midi_maps(maps, instruments)
