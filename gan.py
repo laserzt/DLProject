@@ -338,9 +338,11 @@ def load_data(X):
     return train_loader
 
 
-def main(X, netG, netD, big_epoch):
+def main(X, big_epoch):
+    global netG
+    global netD
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    is_train = True
     epochs = 20
     lr = 0.0002
 
@@ -350,150 +352,145 @@ def main(X, netG, netD, big_epoch):
 
     train_loader = load_data(X)
 
-    if is_train == 1:
-        if big_epoch == 0:
-            netG = generator(pitch_range).to(device)
-            netD = discriminator(pitch_range).to(device)
+    if not netG:
+        netG = generator(pitch_range).to(device)
+        netD = discriminator(pitch_range).to(device)
+        netD.train()
+        netG.train()
 
-            netD.train()
-            netG.train()
+    optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(0.5, 0.999))
+    optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(0.5, 0.999))
 
-        optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(0.5, 0.999))
-        optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(0.5, 0.999))
+    nz = 100
+    real_label = 1
+    fake_label = 0
+    lossD_list = []
+    lossD_list_all = []
+    lossG_list = []
+    lossG_list_all = []
+    D_x_list = []
+    D_G_z_list = []
+    for epoch in range(epochs):
+        sum_lossD = 0
+        sum_lossG = 0
+        sum_D_x = 0
+        sum_D_G_z = 0
+        for i, (data, prev_data) in enumerate(train_loader, 0):
+            ############################
+            # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+            ###########################
+            # train with real
+            netD.zero_grad()
+            real_cpu = data.to(device)
+            prev_data_cpu = prev_data.to(device)
+            # chord_cpu = chord.to(device)
 
-        batch_size = 72
-        nz = 100
-        real_label = 1
-        fake_label = 0
-        lossD_list = []
-        lossD_list_all = []
-        lossG_list = []
-        lossG_list_all = []
-        D_x_list = []
-        D_G_z_list = []
-        for epoch in range(epochs):
-            sum_lossD = 0
-            sum_lossG = 0
-            sum_D_x = 0
-            sum_D_G_z = 0
-            for i, (data, prev_data) in enumerate(train_loader, 0):
+            batch_size = real_cpu.size(0)
+            label = torch.full((batch_size,), real_label, device=device)
+            D, D_logits, fm = netD(real_cpu, None, batch_size, pitch_range)
 
-                ############################
-                # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-                ###########################
-                # train with real
-                netD.zero_grad()
-                real_cpu = data.to(device)
-                prev_data_cpu = prev_data.to(device)
-                # chord_cpu = chord.to(device)
+            #####loss
+            d_loss_real = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits, 0.9 * torch.ones_like(D)))
+            d_loss_real.backward(retain_graph=True)
+            D_x = D.mean().item()
+            sum_D_x += D_x
 
-                batch_size = real_cpu.size(0)
-                label = torch.full((batch_size,), real_label, device=device)
-                D, D_logits, fm = netD(real_cpu, None, batch_size, pitch_range)
+            # train with fake
+            noise = torch.randn(batch_size, nz, device=device)
 
-                #####loss
-                d_loss_real = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits, 0.9 * torch.ones_like(D)))
-                d_loss_real.backward(retain_graph=True)
-                D_x = D.mean().item()
-                sum_D_x += D_x
+            fake = netG(noise, prev_data_cpu, None, batch_size, pitch_range)
+            label.fill_(fake_label)
+            D_, D_logits_, fm_ = netD(fake.detach(), None, batch_size, pitch_range)
+            d_loss_fake = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.zeros_like(D_)))
 
-                # train with fake
-                noise = torch.randn(batch_size, nz, device=device)
+            d_loss_fake.backward(retain_graph=True)
+            D_G_z1 = D_.mean().item()
+            errD = d_loss_real + d_loss_fake
+            errD = errD.item()
+            lossD_list_all.append(errD)
+            sum_lossD += errD
+            optimizerD.step()
 
-                fake = netG(noise, prev_data_cpu, None, batch_size, pitch_range)
-                label.fill_(fake_label)
-                D_, D_logits_, fm_ = netD(fake.detach(), None, batch_size, pitch_range)
-                d_loss_fake = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.zeros_like(D_)))
+            ############################
+            # (2) Update G network: maximize log(D(G(z)))
+            ###########################
+            netG.zero_grad()
+            label.fill_(real_label)  # fake labels are real for generator cost
+            D_, D_logits_, fm_ = netD(fake, None, batch_size, pitch_range)
 
-                d_loss_fake.backward(retain_graph=True)
-                D_G_z1 = D_.mean().item()
-                errD = d_loss_real + d_loss_fake
-                errD = errD.item()
-                lossD_list_all.append(errD)
-                sum_lossD += errD
-                optimizerD.step()
+            ###loss
+            g_loss0 = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.ones_like(D_)))
+            # Feature Matching
+            features_from_g = ops.reduce_mean_0(fm_)
+            features_from_i = ops.reduce_mean_0(fm)
+            fm_g_loss1 = torch.mul(ops.l2_loss(features_from_g, features_from_i), 0.1)
 
-                ############################
-                # (2) Update G network: maximize log(D(G(z)))
-                ###########################
-                netG.zero_grad()
-                label.fill_(real_label)  # fake labels are real for generator cost
-                D_, D_logits_, fm_ = netD(fake, None, batch_size, pitch_range)
+            mean_image_from_g = ops.reduce_mean_0(fake)
+            smean_image_from_i = ops.reduce_mean_0(real_cpu)
+            fm_g_loss2 = torch.mul(ops.l2_loss(mean_image_from_g, smean_image_from_i), 0.01)
 
-                ###loss
-                g_loss0 = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.ones_like(D_)))
-                # Feature Matching
-                features_from_g = ops.reduce_mean_0(fm_)
-                features_from_i = ops.reduce_mean_0(fm)
-                fm_g_loss1 = torch.mul(ops.l2_loss(features_from_g, features_from_i), 0.1)
+            errG = g_loss0 + fm_g_loss1 + fm_g_loss2
+            errG.backward(retain_graph=True)
+            D_G_z2 = D_.mean().item()
+            optimizerG.step()
 
-                mean_image_from_g = ops.reduce_mean_0(fake)
-                smean_image_from_i = ops.reduce_mean_0(real_cpu)
-                fm_g_loss2 = torch.mul(ops.l2_loss(mean_image_from_g, smean_image_from_i), 0.01)
+            ############################
+            # (3) Update G network again: maximize log(D(G(z)))
+            ###########################
+            netG.zero_grad()
+            label.fill_(real_label)  # fake labels are real for generator cost
+            D_, D_logits_, fm_ = netD(fake, None, batch_size, pitch_range)
 
-                errG = g_loss0 + fm_g_loss1 + fm_g_loss2
-                errG.backward(retain_graph=True)
-                D_G_z2 = D_.mean().item()
-                optimizerG.step()
+            ###loss
+            g_loss0 = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.ones_like(D_)))
+            # Feature Matching
+            features_from_g = ops.reduce_mean_0(fm_)
+            features_from_i = ops.reduce_mean_0(fm)
+            loss_ = nn.MSELoss(reduction='sum')
+            feature_l2_loss = loss_(features_from_g, features_from_i) / 2
+            fm_g_loss1 = torch.mul(feature_l2_loss, 0.1)
 
-                ############################
-                # (3) Update G network again: maximize log(D(G(z)))
-                ###########################
-                netG.zero_grad()
-                label.fill_(real_label)  # fake labels are real for generator cost
-                D_, D_logits_, fm_ = netD(fake, None, batch_size, pitch_range)
+            mean_image_from_g = ops.reduce_mean_0(fake)
+            smean_image_from_i = ops.reduce_mean_0(real_cpu)
+            mean_l2_loss = loss_(mean_image_from_g, smean_image_from_i) / 2
+            fm_g_loss2 = torch.mul(mean_l2_loss, 0.01)
+            errG = g_loss0 + fm_g_loss1 + fm_g_loss2
+            sum_lossG += errG
+            errG.backward()
+            lossG_list_all.append(errG.item())
 
-                ###loss
-                g_loss0 = ops.reduce_mean(ops.sigmoid_cross_entropy_with_logits(D_logits_, torch.ones_like(D_)))
-                # Feature Matching
-                features_from_g = ops.reduce_mean_0(fm_)
-                features_from_i = ops.reduce_mean_0(fm)
-                loss_ = nn.MSELoss(reduction='sum')
-                feature_l2_loss = loss_(features_from_g, features_from_i) / 2
-                fm_g_loss1 = torch.mul(feature_l2_loss, 0.1)
+            D_G_z2 = D_.mean().item()
+            sum_D_G_z += D_G_z2
+            optimizerG.step()
 
-                mean_image_from_g = ops.reduce_mean_0(fake)
-                smean_image_from_i = ops.reduce_mean_0(real_cpu)
-                mean_l2_loss = loss_(mean_image_from_g, smean_image_from_i) / 2
-                fm_g_loss2 = torch.mul(mean_l2_loss, 0.01)
-                errG = g_loss0 + fm_g_loss1 + fm_g_loss2
-                sum_lossG += errG
-                errG.backward()
-                lossG_list_all.append(errG.item())
+        if epoch % 5 == 0 or epoch == epochs - 1:
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f', errD, errG, D_x,
+                  D_G_z1, D_G_z2)
 
-                D_G_z2 = D_.mean().item()
-                sum_D_G_z += D_G_z2
-                optimizerG.step()
+            average_lossD = sum_lossD / len(train_loader.dataset)
+            average_lossG = sum_lossG / len(train_loader.dataset)
+            average_D_x = sum_D_x / len(train_loader.dataset)
+            average_D_G_z = sum_D_G_z / len(train_loader.dataset)
 
-            if epoch % 5 == 0 or epoch == epochs -1:
-                print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f', errD, errG, D_x,
-                      D_G_z1, D_G_z2)
+            lossD_list.append(average_lossD)
+            lossG_list.append(average_lossG)
+            D_x_list.append(average_D_x)
+            D_G_z_list.append(average_D_G_z)
 
-                average_lossD = (sum_lossD / len(train_loader.dataset))
-                average_lossG = (sum_lossG / len(train_loader.dataset))
-                average_D_x = (sum_D_x / len(train_loader.dataset))
-                average_D_G_z = (sum_D_G_z / len(train_loader.dataset))
+            print(
+                '==> Epoch: {} Average lossD: {:.10f} average_lossG: {:.10f},average D(x): {:.10f},average D(G(z)): {:.10f} '.format(
+                    epoch, average_lossD, average_lossG, average_D_x, average_D_G_z))
 
-                lossD_list.append(average_lossD)
-                lossG_list.append(average_lossG)
-                D_x_list.append(average_D_x)
-                D_G_z_list.append(average_D_G_z)
-
-                print(
-                    '==> Epoch: {} Average lossD: {:.10f} average_lossG: {:.10f},average D(x): {:.10f},average D(G(z)): {:.10f} '.format(
-                        epoch, average_lossD, average_lossG, average_D_x, average_D_G_z))
-
-                # do checkpointing
-                torch.save(netG.state_dict(),
-                           '%s/netG_epoch_%d.pth' % (out_dir, big_epoch))
-                torch.save(netD.state_dict(),
-                           '%s/netD_epoch_%d.pth' % (out_dir, big_epoch))
-    return netG, netD
+            # do checkpointing
+            torch.save(netG.state_dict(),
+                       '%s/netG_epoch_%d.pth' % (out_dir, big_epoch))
+            torch.save(netD.state_dict(),
+                       '%s/netD_epoch_%d.pth' % (out_dir, big_epoch))
 
 
 def run_training():
-    netG = None
-    netD = None
+    global netG
+    global netD
 
     for j in [0, 2]:
         current_file_index = 0
@@ -501,52 +498,53 @@ def run_training():
             print("Start Training on batch " + str(i))
             X, current_file_index = load_from_json_elements(current_file_index=current_file_index,
                                                             directory=os.path.join(full_dir, str(j)))
-            netG, netD = main(X, netG, netD, i)
+            main(X, i)
 
 
 """###Sampeling"""
 
 
 def sample():
-    is_sample = 1
-    if is_sample == 1:
-        batch_size = 1
-        nz = 100
-        n_bars = 20
-        X, i = load_from_json_elements(directory=part_dir, current_file_index=0)
-        X_te = X[20:21, :, :, :]
-        prev_X_te = X[21:22, :, :, :]
+    global netG
+    global netD
+    batch_size = 1
+    nz = 100
+    n_bars = 20
+    X, i = load_from_json_elements(directory=part_dir, current_file_index=0)
+    X_te = X[20:21, :, :, :]
+    prev_X_te = X[21:22, :, :, :]
 
-        test_iter = get_dataloader(X_te, prev_X_te)  # get_dataloader(X_te,prev_X_te,y_te)
-        kwargs = {'num_workers': 4, 'pin_memory': True}  # if args.cuda else {}
-        test_loader = DataLoader(test_iter, batch_size=batch_size, shuffle=False, **kwargs)
+    test_iter = get_dataloader(X_te, prev_X_te)  # get_dataloader(X_te,prev_X_te,y_te)
+    kwargs = {'num_workers': 4, 'pin_memory': True}  # if args.cuda else {}
+    test_loader = DataLoader(test_iter, batch_size=batch_size, shuffle=False, **kwargs)
 
+    if not netG:
         netG = sample_generator()
         netG.load_state_dict(torch.load(os.path.join(out_dir, 'netG_epoch_19.pth')))
+        netG.eval()
+    output_songs = []
+    for i, (data, prev_data) in enumerate(test_loader, 0):
+        list_song = []
+        first_bar = data[0].view(1, 27, 32, 128)
+        list_song.append(first_bar)
 
-        output_songs = []
-        for i, (data, prev_data) in enumerate(test_loader, 0):
-            list_song = []
-            first_bar = data[0].view(1, 27, 32, 128)
-            list_song.append(first_bar)
+        noise = torch.randn(n_bars, nz)
 
-            noise = torch.randn(n_bars, nz)
+        for bar in range(n_bars):
+            z = noise[bar].view(1, nz)
+            if bar == 0:
+                prev = data[0].view(1, 27, 32, 128)
+                pass
+            else:
+                prev = list_song[bar - 1].view(1, 27, 32, 128)
+            sample = torch.round(netG(z, prev, None, batch_size, 128))
+            list_song.append(sample)
+        output_songs.append(list_song)
 
-            for bar in range(n_bars):
-                z = noise[bar].view(1, nz)
-                if bar == 0:
-                    prev = data[0].view(1, 27, 32, 128)
-                    pass
-                else:
-                    prev = list_song[bar - 1].view(1, 27, 32, 128)
-                sample = torch.round(netG(z, prev, None, batch_size, 128))
-                list_song.append(sample)
-            output_songs.append(list_song)
+        print('num of output_songs: {}'.format(len(output_songs)))
 
-            print('num of output_songs: {}'.format(len(output_songs)))
-
-        print('creation completed, check out what I make!')
-        return output_songs
+    print('creation completed, check out what I make!')
+    return output_songs
 
 
 """###Generate Midi File"""
@@ -584,5 +582,7 @@ def generate_midi(output_songs):
 
 
 if __name__ == '__main__':
+    netG = None
+    netD = None
     run_training()
     generate_midi(sample())
