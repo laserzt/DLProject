@@ -69,8 +69,6 @@ def load_from_json_elements(directory=part_dir, max_files_to_load=30, current_fi
     return X, current_file_index
 
 
-# X = load_from_json_elements()
-
 """##Operational Functions"""
 
 
@@ -307,16 +305,6 @@ class discriminator(nn.Module):
         return h3_sigmoid, h3, fm
 
 
-"""##Training and Sampling
-
-setting up the device
-"""
-
-"""###Training"""
-
-
-# Commented out IPython magic to ensure Python compatibility.
-
 class get_dataloader(object):
     def __init__(self, data, prev_data, y=None):
         self.size = data.shape[0]
@@ -350,7 +338,7 @@ def load_data(X):
     return train_loader
 
 
-def main(X, netG, netD, alreday_trained):
+def main(X, netG, netD, big_epoch):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     is_train = True
     epochs = 20
@@ -363,7 +351,7 @@ def main(X, netG, netD, alreday_trained):
     train_loader = load_data(X)
 
     if is_train == 1:
-        if alreday_trained == 0:
+        if big_epoch == 0:
             netG = generator(pitch_range).to(device)
             netD = discriminator(pitch_range).to(device)
 
@@ -477,29 +465,29 @@ def main(X, netG, netD, alreday_trained):
                 sum_D_G_z += D_G_z2
                 optimizerG.step()
 
-                if epoch % 5 == 0:
-                    print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f', errD, errG, D_x,
-                          D_G_z1, D_G_z2)
+            if epoch % 5 == 0 or epoch == epochs -1:
+                print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f', errD, errG, D_x,
+                      D_G_z1, D_G_z2)
 
-                    average_lossD = (sum_lossD / len(train_loader.dataset))
-                    average_lossG = (sum_lossG / len(train_loader.dataset))
-                    average_D_x = (sum_D_x / len(train_loader.dataset))
-                    average_D_G_z = (sum_D_G_z / len(train_loader.dataset))
+                average_lossD = (sum_lossD / len(train_loader.dataset))
+                average_lossG = (sum_lossG / len(train_loader.dataset))
+                average_D_x = (sum_D_x / len(train_loader.dataset))
+                average_D_G_z = (sum_D_G_z / len(train_loader.dataset))
 
-                    lossD_list.append(average_lossD)
-                    lossG_list.append(average_lossG)
-                    D_x_list.append(average_D_x)
-                    D_G_z_list.append(average_D_G_z)
+                lossD_list.append(average_lossD)
+                lossG_list.append(average_lossG)
+                D_x_list.append(average_D_x)
+                D_G_z_list.append(average_D_G_z)
 
-                    print(
-                        '==> Epoch: {} Average lossD: {:.10f} average_lossG: {:.10f},average D(x): {:.10f},average D(G(z)): {:.10f} '.format(
-                            epoch, average_lossD, average_lossG, average_D_x, average_D_G_z))
+                print(
+                    '==> Epoch: {} Average lossD: {:.10f} average_lossG: {:.10f},average D(x): {:.10f},average D(G(z)): {:.10f} '.format(
+                        epoch, average_lossD, average_lossG, average_D_x, average_D_G_z))
 
-                    # do checkpointing
-                    torch.save(netG.state_dict(),
-                               '%s/netG_epoch_%d.pth' % ('/content/gdrive/MyDrive/models', alreday_trained))
-                    torch.save(netD.state_dict(),
-                               '%s/netD_epoch_%d.pth' % ('/content/gdrive/MyDrive/models', alreday_trained))
+                # do checkpointing
+                torch.save(netG.state_dict(),
+                           '%s/netG_epoch_%d.pth' % (out_dir, big_epoch))
+                torch.save(netD.state_dict(),
+                           '%s/netD_epoch_%d.pth' % (out_dir, big_epoch))
     return netG, netD
 
 
@@ -534,7 +522,7 @@ def sample():
         test_loader = DataLoader(test_iter, batch_size=batch_size, shuffle=False, **kwargs)
 
         netG = sample_generator()
-        netG.load_state_dict(torch.load(os.path.join(out_dir, 'netG.pth')))
+        netG.load_state_dict(torch.load(os.path.join(out_dir, 'netG_epoch_19.pth')))
 
         output_songs = []
         for i, (data, prev_data) in enumerate(test_loader, 0):
@@ -561,9 +549,6 @@ def sample():
         return output_songs
 
 
-output_songs = sample()
-print(output_songs)
-
 """###Generate Midi File"""
 
 
@@ -575,8 +560,6 @@ def generate_midi(output_songs):
         song = songs[0]
         for bar in songs:
             song = torch.cat((song, bar), 0)
-
-    print(song.shape)
 
     song = torch.transpose(song, 1, 0).reshape(27, (len(output_songs[0]) + 1) * 32, 128)
 
@@ -597,6 +580,9 @@ def generate_midi(output_songs):
                     instruments.append(inst + 16 - 3)
                     midi_maps.append(song[inst + 16 - 3].tolist())
                     print("Bass Guitar")
-
-    print(len(midi_maps))
     write_midi_maps(midi_maps, instruments)
+
+
+if __name__ == '__main__':
+    run_training()
+    generate_midi(sample())
