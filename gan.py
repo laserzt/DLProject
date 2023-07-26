@@ -50,8 +50,34 @@ def load_array_from_json_element(file_content):
 
     return bars
 
+def load_array_from_json_element_3D_only(file_content):
+    js = json.loads(file_content)
+    instruments = js["Notes"]
+    notes = np.array(js["Instruments"])
+
+    res = np.zeros((3, notes.shape[1], 128))
+
+    # find the instruments in the sample
+    inst_counter = 0
+    for inst in instruments:
+        group = get_midi_group(inst)
+        if group < 8:
+            res[0] = notes[inst_counter]
+        elif 24 < group < 32:
+            res[1] = notes[inst_counter]
+        elif group < 40:
+            res[2] = notes[inst_counter]
+            inst_counter = inst_counter + 1
+
+        # reshape array
+    num_mini_arrays = res.shape[1] // 32
+    mini_arrays = res[:, :num_mini_arrays * 32, :].reshape(res.shape[0], num_mini_arrays, 32, notes.shape[2])
+
+    bars = np.transpose(mini_arrays, (1, 0, 2, 3))
+    return bars
 
 def load_from_json_elements(directory=part_dir, max_files_to_load=30, current_file_index=0):
+    ## Training on 30 files each time due to RAM capabilities
     x = []
     files_counter = 1
     file_n = current_file_index
@@ -63,7 +89,7 @@ def load_from_json_elements(directory=part_dir, max_files_to_load=30, current_fi
                 print("loading file: " + f)
                 if os.path.isfile(f):
                     with gzip.open(f, 'rb') as f:
-                        x.append(load_array_from_json_element(f.read()))
+                        x.append(load_array_from_json_element_3D_only(f.read()))
                         files_counter = files_counter + 1
     X = np.concatenate(x)
     return X, current_file_index
@@ -167,133 +193,135 @@ class ops:
 """##The Model"""
 
 
-class sample_generator(nn.Module):
-    def __init__(self):
-        super(sample_generator, self).__init__()
-        self.n_instruments = 27
-        self.pitch_range = 128
-
-        self.h1 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h2 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h3 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h4 = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1, 2, self.pitch_range),
-                                     stride=(1, 2, 2))
-
-        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1, 1, self.pitch_range), stride=(1, 2, 2))
-        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
-        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
-        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
-
-        self.linear1 = nn.Linear(100, 1024)
-        self.linear2 = nn.Linear(1024, self.gf_dim * self.n_instruments * 2 * 2 * 1)
-
-    def forward(self, z, prev_x, y, batch_size, pitch_range):
-        prev_x = prev_x.reshape((prev_x.shape[0], 1, prev_x.shape[1], prev_x.shape[2], prev_x.shape[3]))
-
-        h0_prev = self.h0_prev(prev_x)
-        h0_prev = ops.lrelu(ops.batch_norm_3d_cpu(h0_prev), 0.2)
-        h1_prev = self.h1_prev(h0_prev)
-
-        h1_prev = ops.lrelu(ops.batch_norm_3d_cpu(h1_prev), 0.2)
-        h2_prev = ops.lrelu(ops.batch_norm_3d_cpu(self.h2_prev(h1_prev)), 0.2)
-
-        h3_prev = ops.lrelu(ops.batch_norm_3d_cpu(self.h3_prev(h2_prev)), 0.2)
-
-        h0 = F.relu(ops.batch_norm_1d_cpu(self.linear1(z)))
-
-        h1 = F.relu(ops.batch_norm_1d_cpu(self.linear2(h0)))
-        h1 = h1.view(batch_size, self.gf_dim * 2, self.n_instruments, 2, 1)
-        h1 = ops.conv_prev_concat(h1, h3_prev)
-
-        h2 = F.relu(ops.batch_norm_3d_cpu(self.h1(h1)))
-        h2 = ops.conv_prev_concat(h2, h2_prev)
-
-        h3 = F.relu(ops.batch_norm_3d_cpu(self.h2(h2)))
-        h3 = ops.conv_prev_concat(h3, h1_prev)
-
-        h4 = F.relu(ops.batch_norm_3d_cpu(self.h3(h3)))
-        h4 = ops.conv_prev_concat(h4, h0_prev)
-
-        g_x = torch.sigmoid(self.h4(h4))
-        g_x = g_x.reshape((g_x.shape[0], g_x.shape[2], g_x.shape[3], g_x.shape[4]))
-        return g_x
-
-
 class generator(nn.Module):
-    def __init__(self, pitch_range):
+    def __init__(self,pitch_range):
         super(generator, self).__init__()
-        self.n_instruments = 27
+        self.n_instruments = 3
         self.pitch_range = 128
+        self.gf_dim=64
 
-        self.h1 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h2 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h3 = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1, 2, 1),
-                                     stride=(1, 2, 2))
-        self.h4 = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1, 2, pitch_range), stride=(1, 2, 2))
+        self.h1  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h4  = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1,2, self.pitch_range), stride=(1,2,2))
 
-        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1, 1, pitch_range), stride=(1, 2, 2))
-        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
-        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
-        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1, 2, 1), stride=(1, 2, 2))
+        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1,1,pitch_range), stride=(1,2,2))
+        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
 
-        self.linear1 = nn.Linear(100, 1024)
-        self.linear2 = nn.Linear(1024, self.gf_dim * self.n_instruments * 2 * 2 * 1)
+        self.linear1 = nn.Linear(100,1024)
+        self.linear2 = nn.Linear(1024,self.gf_dim*self.n_instruments*2*2*1)
 
-    def forward(self, z, prev_x, y, batch_size, pitch_range):
-        prev_x = prev_x.reshape((prev_x.shape[0], 1, prev_x.shape[1], prev_x.shape[2], prev_x.shape[3]))
+    def forward(self, z, prev_x, y ,batch_size,pitch_range):
+        prev_x = prev_x.reshape((prev_x.shape[0],1,prev_x.shape[1],prev_x.shape[2],prev_x.shape[3]))
 
-        h0_prev = self.h0_prev(prev_x)
-        h0_prev = ops.lrelu(ops.batch_norm_3d(h0_prev), 0.2)
+        h0_prev  = self.h0_prev(prev_x)
+        h0_prev = ops.lrelu(ops.batch_norm_3d(h0_prev),0.2)
         h1_prev = self.h1_prev(h0_prev)
 
-        h1_prev = ops.lrelu(ops.batch_norm_3d(h1_prev), 0.2)
-        h2_prev = ops.lrelu(ops.batch_norm_3d(self.h2_prev(h1_prev)), 0.2)
+        h1_prev = ops.lrelu(ops.batch_norm_3d(h1_prev),0.2)
+        h2_prev = ops.lrelu(ops.batch_norm_3d(self.h2_prev(h1_prev)),0.2)
 
-        h3_prev = ops.lrelu(ops.batch_norm_3d(self.h3_prev(h2_prev)), 0.2)
+        h3_prev = ops.lrelu(ops.batch_norm_3d(self.h3_prev(h2_prev)),0.2)
 
         h0 = F.relu(ops.batch_norm_1d(self.linear1(z)))
 
         h1 = F.relu(ops.batch_norm_1d(self.linear2(h0)))
-        h1 = h1.view(batch_size, self.gf_dim * 2, self.n_instruments, 2, 1)
-        h1 = ops.conv_prev_concat(h1, h3_prev)
+        h1 = h1.view(batch_size, self.gf_dim * 2,self.n_instruments, 2, 1)
+        h1 = ops.conv_prev_concat(h1,h3_prev)
 
         h2 = F.relu(ops.batch_norm_3d(self.h1(h1)))
-        h2 = ops.conv_prev_concat(h2, h2_prev)
+        h2 = ops.conv_prev_concat(h2,h2_prev)
+
 
         h3 = F.relu(ops.batch_norm_3d(self.h2(h2)))
-        h3 = ops.conv_prev_concat(h3, h1_prev)
+        h3 = ops.conv_prev_concat(h3,h1_prev)
 
         h4 = F.relu(ops.batch_norm_3d(self.h3(h3)))
-        h4 = ops.conv_prev_concat(h4, h0_prev)
+        h4 = ops.conv_prev_concat(h4,h0_prev)
 
         g_x = torch.sigmoid(self.h4(h4))
-        g_x = g_x.reshape((g_x.shape[0], g_x.shape[2], g_x.shape[3], g_x.shape[4]))
+        g_x = g_x.reshape((g_x.shape[0],g_x.shape[2],g_x.shape[3],g_x.shape[4]))
+        return g_x
+
+class sample_generator(nn.Module):
+    def __init__(self):
+        super(sample_generator, self).__init__()
+        self.n_instruments = 3
+        self.pitch_range = 128
+        self.gf_dim=64
+
+        self.h1  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h4  = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1,2, self.pitch_range), stride=(1,2,2))
+
+        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1,1, self.pitch_range), stride=(1,2,2))
+        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+
+
+        self.linear1 = nn.Linear(100,1024)
+        self.linear2 = nn.Linear(1024,self.gf_dim*self.n_instruments*2*2*1)
+
+
+    def forward(self, z, prev_x, y ,batch_size,pitch_range):
+
+        prev_x = prev_x.reshape((prev_x.shape[0],1,prev_x.shape[1],prev_x.shape[2],prev_x.shape[3]))
+
+        h0_prev  = self.h0_prev(prev_x)
+        h0_prev = ops.lrelu(ops.batch_norm_3d_cpu(h0_prev),0.2)
+        h1_prev = self.h1_prev(h0_prev)
+
+        h1_prev = ops.lrelu(ops.batch_norm_3d_cpu(h1_prev),0.2)
+        h2_prev = ops.lrelu(ops.batch_norm_3d_cpu(self.h2_prev(h1_prev)),0.2)
+
+        h3_prev = ops.lrelu(ops.batch_norm_3d_cpu(self.h3_prev(h2_prev)),0.2)
+
+        h0 = F.relu(ops.batch_norm_1d_cpu(self.linear1(z)))
+
+        h1 = F.relu(ops.batch_norm_1d_cpu(self.linear2(h0)))
+        h1 = h1.view(batch_size, self.gf_dim * 2,self.n_instruments, 2, 1)
+        h1 = ops.conv_prev_concat(h1,h3_prev)
+
+        h2 = F.relu(ops.batch_norm_3d_cpu(self.h1(h1)))
+        h2 = ops.conv_prev_concat(h2,h2_prev)
+
+
+        h3 = F.relu(ops.batch_norm_3d_cpu(self.h2(h2)))
+        h3 = ops.conv_prev_concat(h3,h1_prev)
+
+        h4 = F.relu(ops.batch_norm_3d_cpu(self.h3(h3)))
+        h4 = ops.conv_prev_concat(h4,h0_prev)
+
+        g_x = torch.sigmoid(self.h4(h4))
+        g_x = g_x.reshape((g_x.shape[0],g_x.shape[2],g_x.shape[3],g_x.shape[4]))
         return g_x
 
 
+
 class discriminator(nn.Module):
-    def __init__(self, pitch_range):
+    def __init__(self,pitch_range):
         super(discriminator, self).__init__()
+        self.dfc_dim = 64
 
-        self.h0_prev = nn.Conv3d(1, 32, kernel_size=(2, 2, 2), stride=(2, 2, 2))
-        self.h1_prev = nn.Conv3d(32, 32, kernel_size=(4, 2, 1), stride=(2, 2, 2))
+        self.h0_prev = nn.Conv3d(1,32, kernel_size=(2,2,2),stride=(2, 2, 2))
+        self.h1_prev = nn.Conv3d(32,32, kernel_size=(1,2,1), stride=(2, 2, 2))
 
-        self.linear0 = nn.Linear(40960, 1280)
-        self.linear1 = nn.Linear(1280, self.dfc_dim)
-        self.linear2 = nn.Linear(1024, 1)
+        self.linear0 =  nn.Linear(8192,1280)
+        self.linear1 = nn.Linear(1280,1024)
+        self.linear2 = nn.Linear(1024,1)
 
-    def forward(self, x, y, batch_size, pitch_range):
-        x = x.reshape((x.shape[0], 1, x.shape[1], x.shape[2], x.shape[3]))
-        h0 = ops.lrelu(self.h0_prev(x), 0.2)
+
+    def forward(self,x,y,batch_size,pitch_range):
+        x = x.reshape((x.shape[0],1,x.shape[1],x.shape[2],x.shape[3]))
+        h0 = ops.lrelu(self.h0_prev(x),0.2)
         fm = h0
 
         h1 = self.h1_prev(h0)
-        h1 = ops.lrelu(ops.batch_norm_3d(h1), 0.2)
+        h1 = ops.lrelu(ops.batch_norm_3d(h1),0.2)
         h1 = h1.view(batch_size, -1)
         h1 = ops.lrelu(ops.batch_norm_1d(self.linear0(h1)))
 
@@ -302,8 +330,8 @@ class discriminator(nn.Module):
         h3 = self.linear2(h2)
         h3_sigmoid = torch.sigmoid(h3)
 
-        return h3_sigmoid, h3, fm
 
+        return h3_sigmoid, h3, fm
 
 class get_dataloader(object):
     def __init__(self, data, prev_data, y=None):
@@ -525,7 +553,7 @@ def sample():
     output_songs = []
     for i, (data, prev_data) in enumerate(test_loader, 0):
         list_song = []
-        first_bar = data[0].view(1, 27, 32, 128)
+        first_bar = data[0].view(1, 3, 32, 128)
         list_song.append(first_bar)
 
         noise = torch.randn(n_bars, nz)
@@ -533,10 +561,10 @@ def sample():
         for bar in range(n_bars):
             z = noise[bar].view(1, nz)
             if bar == 0:
-                prev = data[0].view(1, 27, 32, 128)
+                prev = data[0].view(1, 3, 32, 128)
                 pass
             else:
-                prev = list_song[bar - 1].view(1, 27, 32, 128)
+                prev = list_song[bar - 1].view(1, 3, 32, 128)
             sample = torch.round(netG(z, prev, None, batch_size, 128))
             list_song.append(sample)
         output_songs.append(list_song)
@@ -551,34 +579,32 @@ def sample():
 
 
 def generate_midi(output_songs):
-    instruments = []
-    midi_maps = []
+  instruments = []
+  midi_maps = []
 
-    for songs in output_songs:
-        song = songs[0]
-        for bar in songs:
-            song = torch.cat((song, bar), 0)
+  for songs in output_songs:
+    song = songs[0]
+    for bar in songs:
 
-    song = torch.transpose(song, 1, 0).reshape(27, (len(output_songs[0]) + 1) * 32, 128)
+      song = torch.cat((song,bar),0)
 
-    for inst in range(27):
-        if inst < 3:
-            if not torch.all(song[inst] == 0):
-                if inst == 0:
-                    instruments.append(0)
-                    midi_maps.append(song[inst].tolist())
-                print("Classic piano")
-            elif inst < 8:
-                if not torch.all(song[inst - 3] == 0):
-                    instruments.append(inst - 3)
-                    midi_maps.append(song[inst - 3].tolist())
-                    print("piano")
-            elif inst < 40:
-                if not torch.all(song[inst + 16 - 3] == 0):
-                    instruments.append(inst + 16 - 3)
-                    midi_maps.append(song[inst + 16 - 3].tolist())
-                    print("Bass Guitar")
-    write_midi_maps(midi_maps, instruments)
+  print(song.shape)
+
+  song = torch.transpose(song,1,0).reshape(3, (len(output_songs[0])+1)*32, 128)
+
+  for inst in range(3):
+    if inst < 3:
+      if not torch.all(song[inst] == 0):
+        if inst == 0:
+          instruments.append(0)
+        if inst == 1:
+          instruments.append(26)
+        if inst == 2:
+          instruments.append(33)
+        midi_maps.append(song[inst].tolist())
+
+  print(len(midi_maps))
+  write_midi_maps(midi_maps,instruments)
 
 
 if __name__ == '__main__':
