@@ -176,9 +176,8 @@ def iterate_counts(rounds):
             outfile.write(json.dumps(e))
 
 
-token_maps_round = 3
+token_maps_round = 222
 token_maps = get_token_maps(token_maps_round)
 if token_maps:
     vocab_size = len(token_maps[0])
-    silence_token = token_maps[0]['/1.625']
-
+    silence_token = token_maps[0]['/4']

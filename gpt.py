@@ -4,13 +4,15 @@ from torch.nn import functional as F
 import time
 from tokenization import *
 from common import *
+import matplotlib.pyplot as plt
+import numpy as np
 
 # hyperparameters
 batch_size = 4  # how many independent sequences will we process in parallel?
 block_size = 256  # what is the maximum context length for predictions?
 begin_iters = 0
-max_iters = 40
-eval_interval = 20
+max_iters = 50
+eval_interval = 10
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -26,12 +28,16 @@ torch.manual_seed(1)
 
 # Load Data    
 d = []
+
+
 def add_to_data(f):
     global d
     _, channels = load_tokens(f)
     for k in channels:
         # songs are separated by silence, which is later removed
         d += channels[k] + [silence_token] * block_size
+
+
 iterate_all_files(add_to_data, file_type='.tokens', run_in_threads=False)
 
 data = torch.tensor(d, dtype=torch.long)
@@ -205,6 +211,7 @@ class GPTLanguageModel(nn.Module):
 
     def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
+        accuracy = torch.zeros((1, batch_size))
         for _ in range(max_new_tokens):
             # crop idx to the last block_size tokens
             idx_cond = idx[:, -block_size:]
@@ -216,9 +223,27 @@ class GPTLanguageModel(nn.Module):
             probs = F.softmax(logits, dim=-1)  # (B, C)
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
+            # add sampled probability
+            accuracy += probs[:, idx_next[:, 0]]
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1)  # (B, T+1)
-        return idx
+        return idx, accuracy / max_new_tokens
+
+
+def calculate_accuracy(iterations=10, model_num=None):
+    global model
+    global m
+    if model_num:
+        model = GPTLanguageModel()
+        model.load_state_dict(torch.load(os.path.join(out_dir, f'model_{model_num}')))
+        model.eval()
+        m = model.to(device)
+    res = []
+    for i in range(iterations):
+        context = torch.randint(vocab_size, (2,)).unsqueeze(0)
+        _, accuracy = m.generate(context, max_new_tokens=10)
+        res += list(accuracy.detach().numpy()[0])
+    return sum(res) / len(res)
 
 
 def train_gpt():
@@ -241,8 +266,9 @@ def train_gpt():
         # every once in a while evaluate the loss on train and val sets and save the model
         if iter % eval_interval == 0 or iter == max_iters:
             losses = estimate_loss()
+            acc = calculate_accuracy()
             print(
-                f"step {iter}: training loss {losses['train']:.4f}, validation loss {losses['val']:.4f}, elapsed time: {time.time() - start_time:.1f} secs")
+                f"step {iter}: training loss {losses['train']:.4f}, validation loss {losses['val']:.4f}, accuracy {acc:.4f}, elapsed time: {time.time() - start_time:.1f} secs")
             torch.save(model.state_dict(), os.path.join(out_dir, f'model_{iter}'))
 
         # sample a batch of data
@@ -256,13 +282,15 @@ def train_gpt():
 
 
 def write_song(model_num=None):
+    global model
+    global m
     if model_num:
         model = GPTLanguageModel()
         model.load_state_dict(torch.load(os.path.join(out_dir, f'model_{model_num}')))
         model.eval()
         m = model.to(device)
     context = torch.randint(vocab_size, (2,)).unsqueeze(0)
-    write_midi(detokenize(m.generate(context, max_new_tokens=250)[0].tolist()), 'gpt_song')
+    write_midi(detokenize(m.generate(context, max_new_tokens=250)[0][0].tolist()), 'gpt_song')
 
 
 if __name__ == '__main__':

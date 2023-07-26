@@ -205,13 +205,11 @@ def get_data(f):
 
 
 def serialize_file(f):
-    if os.path.isfile(os.path.splitext(f)[0]+'.notes'):
+    if os.path.isfile(os.path.splitext(f)[0] + '.notes'):
         return
     ch, inst = get_data(f)
     if ch:
         write_json(os.path.splitext(f)[0], inst, ch, '.notes')
-
-
 
 
 def tokenize_json(f):
@@ -245,7 +243,7 @@ def read_notes_map(f):
 
 
 def serialize_notes_map(f):
-    if os.path.isfile(os.path.splitext(f)[0]+'.json'):
+    if os.path.isfile(os.path.splitext(f)[0] + '.json'):
         return
     channels, instruments = read_notes_map(f)
     if channels:
@@ -254,9 +252,10 @@ def serialize_notes_map(f):
 
 if __name__ == '__main__':
     gc.enable()
+    os.makedirs(out_dir, exist_ok=True)
     # gan preprocess
-    #iterate_all_files(serialize_notes_map, file_type='.mid')
+    iterate_all_files(serialize_notes_map, file_type='.mid')
     # gpt preprocess
-    #iterate_all_files(serialize_file, file_type='.mid')
+    iterate_all_files(serialize_file, file_type='.mid')
     iterate_counts(token_maps_round + 1)
     iterate_all_files(tokenize_json, file_type='.notes')

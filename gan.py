@@ -26,19 +26,17 @@ def load_array_from_json_element_3D_only(file_content):
     res = np.zeros((3, notes.shape[1], 128))
 
     # find the instruments in the sample
-    inst_counter = 0
     for i, inst in enumerate(instruments):
         group = get_midi_group(inst, True)
         res[group] = notes[i]
-
-        # reshape array
+    # reshape array
     num_mini_arrays = res.shape[1] // 32
     mini_arrays = res[:, :num_mini_arrays * 32, :].reshape(res.shape[0], num_mini_arrays, 32, notes.shape[2])
 
     bars = np.transpose(mini_arrays, (1, 0, 2, 3))
     return bars
 
-def load_from_json_elements(directory=part_dir, max_files_to_load=30, current_file_index=0):
+def load_from_json_elements(directory, max_files_to_load=30, current_file_index=0):
     ## Training on 30 files each time due to RAM capabilities
     x = []
     files_counter = 1

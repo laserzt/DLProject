@@ -7,12 +7,9 @@ import random
 import threading
 import gc
 
-class MidiException(Exception):
-    pass
-
 home_dir = '/home/producer'
 full_dir = os.path.join(home_dir, 'lmd_full')
-part_dir = os.path.join(full_dir, '3')
+part_dir = os.path.join(full_dir, '0')
 out_dir = os.path.join(home_dir, 'School', 'Data')
 
 midi_instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano',
@@ -40,10 +37,14 @@ midi_instruments = ['Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric G
                     'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot']
 
 
-def get_midi_group(x, GAN):
+class MidiException(Exception):
+    pass
+
+
+def get_midi_group(x, gan):
     if x < 8:  # piano
         return 0
-    elif not GAN:
+    elif not gan:
         return -1
     elif x < 16:  # Chromatic Percussion
         return -1
@@ -186,6 +187,7 @@ def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lamb
         else:
             iterate_all_files(func, file_type, f, fail_func, param, verbose, prefix, False)
 
+
 def write_tokens(f, inst, channels):
     song = {'Instruments': inst, 'Tokens': channels}
     json_object = json.dumps(song)
@@ -198,6 +200,7 @@ def load_tokens(f):
     inst = data['Instruments']
     channels = data['Tokens']
     return inst, channels
+
 
 def get_random_file(dir_name=full_dir, file_type='.mid', prefix=None):
     if prefix:
