@@ -15,40 +15,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from common import *
 
-
-def load_array_from_json_element(file_content):
-    js = json.loads(file_content)
-    instruments = js["Notes"]
-    notes = np.array(js["Instruments"])
-
-    # find the instruments in the sample
-    groups = []
-    piano_count = 0
-    for inst in instruments:
-        group = get_midi_group(inst)
-        if group == 0:
-            groups.append(piano_count)
-        elif group < 8:
-            groups.append(group + 3)
-        elif group < 40:
-            groups.append(group - 16 + 3)
-
-    # reshape array
-    num_mini_arrays = notes.shape[1] // 32
-    mini_arrays = notes[:, :num_mini_arrays * 32, :].reshape(notes.shape[0], num_mini_arrays, 32, notes.shape[2])
-
-    ## 3 rows for piano and all the groups piano guitar and bass
-
-    list = [np.zeros((mini_arrays.shape[1], mini_arrays.shape[2], mini_arrays.shape[3]))] * 27
-    ## assign notes to the right place
-    instrument_count = 0
-    for i in range(len(groups)):
-        list[i] = mini_arrays[instrument_count]
-        instrument_count = instrument_count + 1
-    bars = np.array(list)
-    bars = np.transpose(bars, (1, 0, 2, 3))
-
-    return bars
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+kwargs = {'num_workers': 4, 'pin_memory': True} if torch.cuda.is_available() else {}
 
 def load_array_from_json_element_3D_only(file_content):
     js = json.loads(file_content)
@@ -59,15 +27,9 @@ def load_array_from_json_element_3D_only(file_content):
 
     # find the instruments in the sample
     inst_counter = 0
-    for inst in instruments:
-        group = get_midi_group(inst)
-        if group < 8:
-            res[0] = notes[inst_counter]
-        elif 24 < group < 32:
-            res[1] = notes[inst_counter]
-        elif group < 40:
-            res[2] = notes[inst_counter]
-            inst_counter = inst_counter + 1
+    for i, inst in enumerate(instruments):
+        group = get_midi_group(inst, True)
+        res[group] = notes[i]
 
         # reshape array
     num_mini_arrays = res.shape[1] // 32
@@ -81,7 +43,7 @@ def load_from_json_elements(directory=part_dir, max_files_to_load=30, current_fi
     x = []
     files_counter = 1
     file_n = current_file_index
-    y = glob.glob(os.path.join(directory, '*'))
+    y = glob.glob(os.path.join(directory, '*.json'))
 
     for file_n, f in enumerate(y):
         if file_n < current_file_index + max_files_to_load:
@@ -126,7 +88,7 @@ class ops:
     def batch_norm_1d(x):
         x_shape = x.shape[1]
         batch_nor = nn.BatchNorm1d(x_shape, eps=1e-05, momentum=0.9, affine=True)
-        batch_nor = batch_nor.cuda()
+        batch_nor = batch_nor.to(device)
 
         output = batch_nor(x)
         return output
@@ -134,9 +96,6 @@ class ops:
     @staticmethod
     def batch_norm_1d_cpu(x):
         x_shape = x.shape[1]
-        # ipdb.set_trace()
-        # batch_nor = nn.BatchNorm1d(x_shape, eps=1e-05, momentum=0.9, affine=True)
-        # output = batch_nor(x)
         output = x
         return output
 
@@ -144,7 +103,7 @@ class ops:
     def batch_norm_2d(x):
         x_shape = x.shape[1]
         batch_nor = nn.BatchNorm2d(x_shape, eps=1e-05, momentum=0.9, affine=True)
-        batch_nor = batch_nor.cuda()
+        batch_nor = batch_nor.to(device)
         output = batch_nor(x)
         return output
 
@@ -152,7 +111,7 @@ class ops:
     def batch_norm_3d(x):
         x_shape = x.shape[1]
         batch_nor = nn.BatchNorm3d(x_shape, eps=1e-05, momentum=0.9, affine=True)
-        batch_nor = batch_nor.cuda()
+        batch_nor = batch_nor.to(device)
         output = batch_nor(x)
         return output
 
@@ -359,7 +318,6 @@ def load_data(X):
     prev_X_tr = prev_X_tr[:, :, :, check_range_st:check_range_ed]
 
     train_iter = get_dataloader(X_tr, prev_X_tr)
-    kwargs = {'num_workers': 4, 'pin_memory': True}  # if args.cuda else {}
     train_loader = DataLoader(train_iter, batch_size=72, shuffle=True, **kwargs)
     print('data preparation is completed')
     #######################################
@@ -370,7 +328,6 @@ def main(X, big_epoch):
     global netG
     global netD
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     epochs = 20
     lr = 0.0002
 
@@ -403,7 +360,7 @@ def main(X, big_epoch):
         sum_lossG = 0
         sum_D_x = 0
         sum_D_G_z = 0
-        for i, (data, prev_data) in enumerate(train_loader, 0):
+        for i, (data, prev_data) in enumerate(train_loader):
             ############################
             # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
             ###########################
@@ -411,7 +368,6 @@ def main(X, big_epoch):
             netD.zero_grad()
             real_cpu = data.to(device)
             prev_data_cpu = prev_data.to(device)
-            # chord_cpu = chord.to(device)
 
             batch_size = real_cpu.size(0)
             label = torch.full((batch_size,), real_label, device=device)
@@ -542,8 +498,7 @@ def sample():
     X_te = X[20:21, :, :, :]
     prev_X_te = X[21:22, :, :, :]
 
-    test_iter = get_dataloader(X_te, prev_X_te)  # get_dataloader(X_te,prev_X_te,y_te)
-    kwargs = {'num_workers': 4, 'pin_memory': True}  # if args.cuda else {}
+    test_iter = get_dataloader(X_te, prev_X_te)
     test_loader = DataLoader(test_iter, batch_size=batch_size, shuffle=False, **kwargs)
 
     if not netG:

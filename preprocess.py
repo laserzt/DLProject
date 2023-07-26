@@ -2,6 +2,7 @@ import pygame
 import time
 from tokenization import *
 from common import *
+import gc
 
 mixer_init = False
 
@@ -19,11 +20,14 @@ def play_midi(filename):
 
 
 def get_instruments(filename):
-    mid = mido.MidiFile(filename)
     res = {}
-    for msg in mid:
-        if msg.type == 'program_change':
-            res[msg.channel] = (midi_instruments[msg.program], msg.program)
+    try:
+        mid = mido.MidiFile(filename)
+        for msg in mid:
+            if msg.type == 'program_change':
+                res[msg.channel] = (midi_instruments[msg.program], msg.program)
+    except:
+        raise MidiException
     return res
 
 
@@ -37,14 +41,15 @@ def convert_to_lengths(channels):
 
 
 def get_notes_map(filename, channels_to_get):
-    mid = mido.MidiFile(filename)
+    try:
+        mid = mido.MidiFile(filename)
+    except:
+        raise MidiException
     total_ticks = 0
     channels = []
     channels_index = {}
     tempo = 500000
-    mid_len = int(
-        math.ceil(
-            mido.second2tick(mid.length, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)) / mid.ticks_per_beat * 16)
+    mid_len = 1000
     for i in range(len(channels_to_get)):
         channels.append([])
         for j in range(mid_len):
@@ -52,42 +57,45 @@ def get_notes_map(filename, channels_to_get):
         channels_index[channels_to_get[i]] = i
     cur_place = 0
     mono_channels = []
-    for msg in mid:
-        ticks = 0
-        if msg.time > 0:
-            ticks = int(round(mido.second2tick(msg.time, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)))
-        if msg.type == 'set_tempo':
-            tempo = msg.tempo
-        if ticks:
-            total_ticks += ticks
-            while total_ticks >= mid.ticks_per_beat / 8:
-                cur_place += 1
-                if mid_len <= cur_place:
-                    for ch in range(len(channels)):
-                        for j in range(8):
-                            channels[ch].append([0] * 128)
-                    mid_len += 8
-                for note in range(128):
-                    for ch in range(len(channels)):
-                        channels[ch][cur_place][note] = channels[ch][cur_place - 1][note]
-                total_ticks -= mid.ticks_per_beat / 8
-        if not (msg.type == 'note_on' or msg.type == 'note_off' or msg.type == 'control_change'):
-            continue
-        if msg.channel in channels_index:
-            channel = channels_index[msg.channel]
-            if msg.type == 'note_on':
-                if channel in mono_channels:
+    try:
+        for msg in mid:
+            ticks = 0
+            if msg.time > 0:
+                ticks = int(round(mido.second2tick(msg.time, ticks_per_beat=mid.ticks_per_beat, tempo=tempo)))
+            if msg.type == 'set_tempo':
+                tempo = msg.tempo
+            if ticks:
+                total_ticks += ticks
+                while total_ticks >= mid.ticks_per_beat / 8:
+                    cur_place += 1
+                    if mid_len <= cur_place:
+                        for ch in range(len(channels)):
+                            for j in range(8):
+                                channels[ch].append([0] * 128)
+                        mid_len += 8
                     for note in range(128):
-                        channels[channel][cur_place][note] = 0
-                channels[channel][cur_place][msg.note] = 1
-            if msg.type == 'note_off':
-                channels[channel][cur_place][msg.note] = 0
-            if msg.type == 'control_change' and msg.control == 93:
-                mono_channels.append(channel)
-        if msg.type == 'control_change' and msg.control >= 90:
-            for ch in range(len(channels)):
-                for note in range(128):
-                    channels[ch][cur_place][note] = 0
+                        for ch in range(len(channels)):
+                            channels[ch][cur_place][note] = channels[ch][cur_place - 1][note]
+                    total_ticks -= mid.ticks_per_beat / 8
+            if not (msg.type == 'note_on' or msg.type == 'note_off' or msg.type == 'control_change'):
+                continue
+            if msg.channel in channels_index:
+                channel = channels_index[msg.channel]
+                if msg.type == 'note_on':
+                    if channel in mono_channels:
+                        for note in range(128):
+                            channels[channel][cur_place][note] = 0
+                    channels[channel][cur_place][msg.note] = 1
+                if msg.type == 'note_off':
+                    channels[channel][cur_place][msg.note] = 0
+                if msg.type == 'control_change' and msg.control == 93:
+                    mono_channels.append(channel)
+            if msg.type == 'control_change' and msg.control >= 90:
+                for ch in range(len(channels)):
+                    for note in range(128):
+                        channels[ch][cur_place][note] = 0
+    except:
+        raise MidiException
     for ch in range(len(channels)):
         for i in range(mid_len - 1, cur_place, -1):
             del channels[ch][i]
@@ -95,7 +103,7 @@ def get_notes_map(filename, channels_to_get):
 
 
 def get_notes(filename, channels):
-    m, ticks_per_beat = get_notes_map(filename, channels, False)
+    m, ticks_per_beat = get_notes_map(filename, channels)
     if len(m) > 1:
         channel = []
         for i in range(len(m[0])):
@@ -197,23 +205,13 @@ def get_data(f):
 
 
 def serialize_file(f):
+    if os.path.isfile(os.path.splitext(f)[0]+'.notes'):
+        return
     ch, inst = get_data(f)
     if ch:
         write_json(os.path.splitext(f)[0], inst, ch, '.notes')
 
 
-def write_tokens(f, inst, channels):
-    song = {'Instruments': inst, 'Tokens': channels}
-    json_object = json.dumps(song)
-    with open("{0}.tokens".format(f), "w") as outfile:
-        outfile.write(json_object)
-
-
-def load_tokens(f):
-    data = json.load(open(f, 'r'))
-    inst = data['Instruments']
-    channels = data['Tokens']
-    return inst, channels
 
 
 def tokenize_json(f):
@@ -247,15 +245,18 @@ def read_notes_map(f):
 
 
 def serialize_notes_map(f):
+    if os.path.isfile(os.path.splitext(f)[0]+'.json'):
+        return
     channels, instruments = read_notes_map(f)
     if channels:
         write_json(os.path.splitext(f)[0], channels, instruments)
 
 
 if __name__ == '__main__':
+    gc.enable()
     # gan preprocess
-    iterate_all_files(serialize_notes_map, file_type='.mid')
+    #iterate_all_files(serialize_notes_map, file_type='.mid')
     # gpt preprocess
-    iterate_all_files(serialize_file, file_type='.mid')
+    #iterate_all_files(serialize_file, file_type='.mid')
     iterate_counts(token_maps_round + 1)
     iterate_all_files(tokenize_json, file_type='.notes')

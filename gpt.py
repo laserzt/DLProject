@@ -3,13 +3,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 import time
 from tokenization import *
+from common import *
 
 # hyperparameters
 batch_size = 4  # how many independent sequences will we process in parallel?
 block_size = 256  # what is the maximum context length for predictions?
-begin_iters = 150
-max_iters = 300
-eval_interval = 50
+begin_iters = 0
+max_iters = 40
+eval_interval = 20
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -23,14 +24,15 @@ m = None
 
 torch.manual_seed(1)
 
-# Load Data
+# Load Data    
 d = []
-for f in glob.glob('/home/producer/lmd_tokens/*.tokens'):
-    blob = json.load(open(f, 'r'))
-    channels = blob['Tokens']
+def add_to_data(f):
+    global d
+    _, channels = load_tokens(f)
     for k in channels:
         # songs are separated by silence, which is later removed
         d += channels[k] + [silence_token] * block_size
+iterate_all_files(add_to_data, file_type='.tokens', run_in_threads=False)
 
 data = torch.tensor(d, dtype=torch.long)
 n = int(0.9 * len(data))  # first 90% will be train, rest val
@@ -256,7 +258,7 @@ def train_gpt():
 def write_song(model_num=None):
     if model_num:
         model = GPTLanguageModel()
-        model.load_state_dict(torch.load(os.path.join(out_dir(f'model_{model_num}'))))
+        model.load_state_dict(torch.load(os.path.join(out_dir, f'model_{model_num}')))
         model.eval()
         m = model.to(device)
     context = torch.randint(vocab_size, (2,)).unsqueeze(0)

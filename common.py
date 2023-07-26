@@ -5,8 +5,12 @@ import json
 import glob
 import random
 import threading
+import gc
 
-home_dir = 'c:\\'  # ''/home/producer'
+class MidiException(Exception):
+    pass
+
+home_dir = '/home/producer'
 full_dir = os.path.join(home_dir, 'lmd_full')
 part_dir = os.path.join(full_dir, '3')
 out_dir = os.path.join(home_dir, 'School', 'Data')
@@ -172,6 +176,9 @@ def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lamb
                         func(f, param)
                     else:
                         func(f)
+                    gc.collect()
+                except MidiException:
+                    continue
                 except Exception as e:
                     print('Failed on file', f, type(e), e)
                     fail_func(f)
@@ -179,6 +186,18 @@ def iterate_all_files(func, file_type='.mid', directory=full_dir, fail_func=lamb
         else:
             iterate_all_files(func, file_type, f, fail_func, param, verbose, prefix, False)
 
+def write_tokens(f, inst, channels):
+    song = {'Instruments': inst, 'Tokens': channels}
+    json_object = json.dumps(song)
+    with open("{0}.tokens".format(f), "w") as outfile:
+        outfile.write(json_object)
+
+
+def load_tokens(f):
+    data = json.load(open(f, 'r'))
+    inst = data['Instruments']
+    channels = data['Tokens']
+    return inst, channels
 
 def get_random_file(dir_name=full_dir, file_type='.mid', prefix=None):
     if prefix:

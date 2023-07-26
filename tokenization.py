@@ -1,8 +1,6 @@
 import math
 from common import *
 
-midi_groups = 1
-
 
 def join_str_keys(x, y):
     return ','.join([x, y])
@@ -129,6 +127,7 @@ def count_file(f, ms):
 def iterate_counts(rounds):
     token_map_file = None
     token_map_index = 0
+    midi_groups = 1
     for i in reversed(range(rounds)):
         if os.path.isfile(os.path.join(out_dir, 'token_map_{0}.json'.format(i))):
             token_map_file = os.path.join(out_dir, "token_map_{0}.json".format(i))
@@ -177,7 +176,9 @@ def iterate_counts(rounds):
             outfile.write(json.dumps(e))
 
 
-token_maps_round = 222
+token_maps_round = 3
 token_maps = get_token_maps(token_maps_round)
-vocab_size = len(token_maps)
-silence_token = token_maps(',/4')
+if token_maps:
+    vocab_size = len(token_maps[0])
+    silence_token = token_maps[0]['/1.625']
+
