@@ -149,59 +149,6 @@ class ops:
 
 """##The Model"""
 
-
-class generator(nn.Module):
-    def __init__(self,pitch_range):
-        super(generator, self).__init__()
-        self.n_instruments = 3
-        self.pitch_range = 128
-        self.gf_dim=64
-
-        self.h1  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
-        self.h2  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
-        self.h3  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
-        self.h4  = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1,2, self.pitch_range), stride=(1,2,2))
-
-        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1,1,pitch_range), stride=(1,2,2))
-        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
-        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
-        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
-
-        self.linear1 = nn.Linear(100,1024)
-        self.linear2 = nn.Linear(1024,self.gf_dim*self.n_instruments*2*2*1)
-
-    def forward(self, z, prev_x, y ,batch_size,pitch_range):
-        prev_x = prev_x.reshape((prev_x.shape[0],1,prev_x.shape[1],prev_x.shape[2],prev_x.shape[3]))
-
-        h0_prev  = self.h0_prev(prev_x)
-        h0_prev = ops.lrelu(ops.batch_norm_3d(h0_prev),0.2)
-        h1_prev = self.h1_prev(h0_prev)
-
-        h1_prev = ops.lrelu(ops.batch_norm_3d(h1_prev),0.2)
-        h2_prev = ops.lrelu(ops.batch_norm_3d(self.h2_prev(h1_prev)),0.2)
-
-        h3_prev = ops.lrelu(ops.batch_norm_3d(self.h3_prev(h2_prev)),0.2)
-
-        h0 = F.relu(ops.batch_norm_1d(self.linear1(z)))
-
-        h1 = F.relu(ops.batch_norm_1d(self.linear2(h0)))
-        h1 = h1.view(batch_size, self.gf_dim * 2,self.n_instruments, 2, 1)
-        h1 = ops.conv_prev_concat(h1,h3_prev)
-
-        h2 = F.relu(ops.batch_norm_3d(self.h1(h1)))
-        h2 = ops.conv_prev_concat(h2,h2_prev)
-
-
-        h3 = F.relu(ops.batch_norm_3d(self.h2(h2)))
-        h3 = ops.conv_prev_concat(h3,h1_prev)
-
-        h4 = F.relu(ops.batch_norm_3d(self.h3(h3)))
-        h4 = ops.conv_prev_concat(h4,h0_prev)
-
-        g_x = torch.sigmoid(self.h4(h4))
-        g_x = g_x.reshape((g_x.shape[0],g_x.shape[2],g_x.shape[3],g_x.shape[4]))
-        return g_x
-
 class sample_generator(nn.Module):
     def __init__(self):
         super(sample_generator, self).__init__()
@@ -259,6 +206,59 @@ class sample_generator(nn.Module):
 
 
 
+class generator(nn.Module):
+    def __init__(self,pitch_range):
+        super(generator, self).__init__()
+        self.n_instruments = 3
+        self.pitch_range = 128
+        self.gf_dim=64
+
+        self.h1  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3  = nn.ConvTranspose3d(in_channels=160, out_channels=self.pitch_range, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h4  = nn.ConvTranspose3d(in_channels=160, out_channels=1, kernel_size=(1,2, self.pitch_range), stride=(1,2,2))
+
+        self.h0_prev = nn.Conv3d(in_channels=1, out_channels=32, kernel_size=(1,1,pitch_range), stride=(1,2,2))
+        self.h1_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h2_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+        self.h3_prev = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(1,2,1), stride=(1,2,2))
+
+        self.linear1 = nn.Linear(100,1024)
+        self.linear2 = nn.Linear(1024,self.gf_dim*self.n_instruments*2*2*1)
+
+    def forward(self, z, prev_x, y ,batch_size,pitch_range):
+        prev_x = prev_x.reshape((prev_x.shape[0],1,prev_x.shape[1],prev_x.shape[2],prev_x.shape[3]))
+
+        h0_prev  = self.h0_prev(prev_x)
+        h0_prev = ops.lrelu(ops.batch_norm_3d(h0_prev),0.2)
+        h1_prev = self.h1_prev(h0_prev)
+
+        h1_prev = ops.lrelu(ops.batch_norm_3d(h1_prev),0.2)
+        h2_prev = ops.lrelu(ops.batch_norm_3d(self.h2_prev(h1_prev)),0.2)
+
+        h3_prev = ops.lrelu(ops.batch_norm_3d(self.h3_prev(h2_prev)),0.2)
+
+        h0 = F.relu(ops.batch_norm_1d(self.linear1(z)))
+
+        h1 = F.relu(ops.batch_norm_1d(self.linear2(h0)))
+        h1 = h1.view(batch_size, self.gf_dim * 2,self.n_instruments, 2, 1)
+        h1 = ops.conv_prev_concat(h1,h3_prev)
+
+        h2 = F.relu(ops.batch_norm_3d(self.h1(h1)))
+        h2 = ops.conv_prev_concat(h2,h2_prev)
+
+
+        h3 = F.relu(ops.batch_norm_3d(self.h2(h2)))
+        h3 = ops.conv_prev_concat(h3,h1_prev)
+
+        h4 = F.relu(ops.batch_norm_3d(self.h3(h3)))
+        h4 = ops.conv_prev_concat(h4,h0_prev)
+
+        g_x = torch.sigmoid(self.h4(h4))
+        g_x = g_x.reshape((g_x.shape[0],g_x.shape[2],g_x.shape[3],g_x.shape[4]))
+        return g_x
+
+
 class discriminator(nn.Module):
     def __init__(self,pitch_range):
         super(discriminator, self).__init__()
@@ -289,6 +289,7 @@ class discriminator(nn.Module):
 
 
         return h3_sigmoid, h3, fm
+
 
 class get_dataloader(object):
     def __init__(self, data, prev_data, y=None):
@@ -322,7 +323,7 @@ def load_data(X):
     return train_loader
 
 
-def main(X, big_epoch):
+def main(X):
     global netG
     global netD
 
@@ -465,22 +466,18 @@ def main(X, big_epoch):
 
             # do checkpointing
             torch.save(netG.state_dict(),
-                       '%s/netG_epoch_%d.pth' % (out_dir, big_epoch))
+                       '%s/netG_epoch_%d.pth' % (out_dir,epoch))
             torch.save(netD.state_dict(),
-                       '%s/netD_epoch_%d.pth' % (out_dir, big_epoch))
+                       '%s/netD_epoch_%d.pth' % (out_dir,epoch))
 
 
 def run_training():
     global netG
     global netD
 
-    for j in [0, 2]:
-        current_file_index = 0
-        for i in range(20):
-            print("Start Training on batch " + str(i))
-            X, current_file_index = load_from_json_elements(current_file_index=current_file_index,
-                                                            directory=os.path.join(full_dir, str(j)))
-            main(X, i)
+
+    X, current_file_index = load_from_json_elements(directory='insert data directory here')
+    main(X)
 
 
 """###Sampeling"""
